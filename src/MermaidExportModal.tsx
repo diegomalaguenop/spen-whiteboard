@@ -1,18 +1,28 @@
 import { useEffect, useRef, useState } from 'react'
-import mermaid from 'mermaid'
 import type { MermaidExportResult } from './mermaidExport'
+
+type Mermaid = typeof import('mermaid').default
 
 interface MermaidExportModalProps {
   result: MermaidExportResult | null
   onClose: () => void
 }
 
+let mermaidModulePromise: Promise<Mermaid> | null = null
 let mermaidInitialized = false
 
-function ensureMermaidInitialized(): void {
-  if (mermaidInitialized) return
-  mermaid.initialize({ theme: 'dark', startOnLoad: false })
-  mermaidInitialized = true
+function loadMermaid(): Promise<Mermaid> {
+  if (!mermaidModulePromise) {
+    mermaidModulePromise = import('mermaid').then((mod) => {
+      const mermaid = mod.default
+      if (!mermaidInitialized) {
+        mermaid.initialize({ theme: 'dark', startOnLoad: false })
+        mermaidInitialized = true
+      }
+      return mermaid
+    })
+  }
+  return mermaidModulePromise
 }
 
 function MermaidExportModal({ result, onClose }: MermaidExportModalProps) {
@@ -22,11 +32,10 @@ function MermaidExportModal({ result, onClose }: MermaidExportModalProps) {
 
   useEffect(() => {
     if (!result) return
-    ensureMermaidInitialized()
     let cancelled = false
     setPreviewError(null)
-    mermaid
-      .render(`mermaid-preview-${Date.now()}`, result.code)
+    loadMermaid()
+      .then((mermaid) => mermaid.render(`mermaid-preview-${Date.now()}`, result.code))
       .then(({ svg }) => {
         if (!cancelled && previewRef.current) previewRef.current.innerHTML = svg
       })
