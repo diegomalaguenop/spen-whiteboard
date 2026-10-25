@@ -100,6 +100,49 @@ html, body, #root {
   background: #3b5bdb;
 }
 
+.add-project {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #2a2a2e;
+}
+
+.add-project input {
+  background: #1f1f23;
+  border: 1px solid #333;
+  color: #eee;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.add-project button {
+  background: transparent;
+  border: 1px solid #333;
+  color: #ccc;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.add-project button:hover {
+  background: #1f1f23;
+  color: #fff;
+}
+
+.search-input {
+  background: #1f1f23;
+  border: 1px solid #333;
+  color: #eee;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
 .board-list {
   flex: 1;
   overflow-y: auto;
@@ -109,13 +152,33 @@ html, body, #root {
   margin-bottom: 14px;
 }
 
+.project-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  padding-left: 4px;
+  padding-right: 2px;
+}
+
 .project-label {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #777;
-  margin-bottom: 6px;
-  padding-left: 4px;
+}
+
+.delete-project-btn {
+  background: transparent;
+  border: none;
+  color: #777;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+
+.delete-project-btn:hover {
+  color: #ff6b6b;
 }
 
 .board-item {
@@ -142,6 +205,17 @@ html, body, #root {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.board-name-input {
+  flex: 1;
+  background: #1f1f23;
+  border: 1px solid #4c6ef5;
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  margin-right: 6px;
 }
 
 .delete-btn {
@@ -175,8 +249,84 @@ html, body, #root {
 }
 
 .excalidraw-wrapper {
-  height: 100%;
+  height: calc(100% - 44px);
   width: 100%;
+}
+
+.canvas-header {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 0 16px;
+  background: #151517;
+  border-bottom: 1px solid #2a2a2e;
+  position: relative;
+  z-index: 5;
+}
+
+.canvas-header-title {
+  color: #ccc;
+  font-size: 13px;
+  font-weight: 500;
+  margin-right: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.export-menu {
+  position: relative;
+}
+
+.export-menu-btn {
+  background: #4c6ef5;
+  border: none;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.export-menu-btn:hover {
+  background: #3b5bdb;
+}
+
+.export-menu-btn:disabled {
+  background: #333;
+  cursor: not-allowed;
+}
+
+.export-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: #1f1f23;
+  border: 1px solid #2a2a2e;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  min-width: 100px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.export-menu-item {
+  background: transparent;
+  border: none;
+  color: #eee;
+  padding: 8px 12px;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.export-menu-item:hover {
+  background: #28304d;
+  color: #fff;
 }
 
 .excalidraw {
