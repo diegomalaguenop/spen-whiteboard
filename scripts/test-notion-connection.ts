@@ -3,11 +3,17 @@
 // directo a api.notion.com (sin pasar por nuestro proxy de Vercel) para poder aislar si un
 // fallo está en la lógica/payload que compartimos con el proxy, o en el proxy mismo.
 //
+// Si además pasás NOTION_PROXY_URL (la URL del deploy de Vercel), al final repite el paso
+// de búsqueda PERO a través de ese proxy (igual que hace la app real), para comparar si da
+// el mismo resultado que la llamada directa — así se puede aislar un bug específico del
+// proxy sin que el token tenga que circular por ningún lado más que tus propias env vars.
+//
 // Uso:
 //   NOTION_TOKEN=xxx NOTION_PAGE_ID=xxx npx tsx scripts/test-notion-connection.ts
+//   NOTION_TOKEN=xxx NOTION_PAGE_ID=xxx NOTION_PROXY_URL=https://tu-deploy.vercel.app npx tsx scripts/test-notion-connection.ts
 //
-// No hardcodea ni pide el token por stdin — si falta alguna env var, tira error y no hace
-// ningún request.
+// No hardcodea ni pide el token por stdin — si falta alguna env var obligatoria, tira error
+// y no hace ningún request.
 
 const NOTION_VERSION = '2026-03-11'
 const NOTION_API_BASE = 'https://api.notion.com'
@@ -15,6 +21,7 @@ const DATABASE_TITLE = 'S Pen Whiteboard'
 
 const token = process.env.NOTION_TOKEN
 const rawPageId = process.env.NOTION_PAGE_ID
+const proxyUrl = process.env.NOTION_PROXY_URL
 
 if (!token) {
   console.error('Falta la variable de entorno NOTION_TOKEN. Corré:')
@@ -155,7 +162,44 @@ async function main(): Promise<void> {
   logResult(testPage)
   if (testPage.status !== 200) fail('crear página de prueba (POST /v1/pages)', testPage)
 
-  console.log('\n✅ Todo el flujo funcionó de punta a punta. Revisá la página de Notion.')
+  console.log('\n✅ Todo el flujo funcionó de punta a punta (llamando directo a Notion). Revisá la página de Notion.')
+
+  if (proxyUrl) {
+    logStep('4. Repetir la búsqueda a través del proxy de Vercel, para comparar')
+    const proxyEndpoint = `${proxyUrl.replace(/\/$/, '')}/api/notion-proxy`
+    console.log(`Llamando a: ${proxyEndpoint}`)
+    const proxyResponse = await fetch(proxyEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token,
+        method: 'POST',
+        path: '/v1/search',
+        body: {
+          query: DATABASE_TITLE,
+          filter: { property: 'object', value: 'data_source', in_trash: false },
+        },
+      }),
+    })
+    const proxyText = await proxyResponse.text()
+    let proxyBody: unknown
+    try {
+      proxyBody = JSON.parse(proxyText)
+    } catch {
+      proxyBody = proxyText
+    }
+    console.log(`status: ${proxyResponse.status}`)
+    console.log(typeof proxyBody === 'string' ? proxyBody : JSON.stringify(proxyBody, null, 2))
+    if (proxyResponse.status === 200) {
+      console.log('\n✅ El proxy también funciona igual que la llamada directa.')
+    } else {
+      console.log('\n❌ El proxy dio un resultado distinto al de la llamada directa — el bug está ahí.')
+    }
+  } else {
+    console.log(
+      '\n(No se pasó NOTION_PROXY_URL, así que no se probó el proxy de Vercel en esta corrida.)'
+    )
+  }
 }
 
 main().catch((error: unknown) => {
