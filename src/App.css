@@ -462,3 +462,93 @@ html, body, #root {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.mermaid-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.mermaid-modal {
+  background: #151517;
+  border: 1px solid #2a2a2e;
+  border-radius: 10px;
+  padding: 20px;
+  width: min(720px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mermaid-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mermaid-modal-header h2 {
+  margin: 0;
+  font-size: 16px;
+  color: #fff;
+}
+
+.mermaid-modal-empty {
+  color: #ccc;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.mermaid-modal-summary {
+  color: #999;
+  font-size: 12px;
+  margin: 0;
+}
+
+.mermaid-preview {
+  background: #1a1a1e;
+  border: 1px solid #2a2a2e;
+  border-radius: 6px;
+  padding: 12px;
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+}
+
+.mermaid-preview-error {
+  color: #ff6b6b;
+  font-size: 12px;
+}
+
+.mermaid-code {
+  background: #1a1a1e;
+  border: 1px solid #2a2a2e;
+  border-radius: 6px;
+  padding: 12px;
+  overflow-x: auto;
+  font-size: 12px;
+  color: #eee;
+  margin: 0;
+}
+
+.mermaid-copy-btn {
+  align-self: flex-start;
+  background: #4c6ef5;
+  border: none;
+  color: white;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.mermaid-copy-btn:hover {
+  background: #3b5bdb;
+}

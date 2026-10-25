@@ -9,6 +9,8 @@ import { TECHNICAL_STENCILS } from './stencils'
 import type { Board, Project } from './types'
 import { canvasKey, loadCanvasData, saveCanvasData } from './canvasStorage'
 import PresentationView from './PresentationView'
+import { exportToMermaid, type MermaidExportResult } from './mermaidExport'
+import MermaidExportModal from './MermaidExportModal'
 import './App.css'
 
 const BOARDS_KEY = 'spen-whiteboard:boards'
@@ -66,6 +68,8 @@ function App() {
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [presentation, setPresentation] = useState<{ boards: Board[]; index: number } | null>(null)
+  const [mermaidModalOpen, setMermaidModalOpen] = useState(false)
+  const [mermaidResult, setMermaidResult] = useState<MermaidExportResult | null>(null)
   const saveTimeoutRef = useRef<number | null>(null)
   const excalidrawAPIRef = useRef<ExcalidrawImperativeAPI | null>(null)
 
@@ -140,6 +144,14 @@ function App() {
     } finally {
       setExporting(false)
     }
+  }
+
+  function handleMermaidExport(): void {
+    const api = excalidrawAPIRef.current
+    if (!api) return
+    setExportMenuOpen(false)
+    setMermaidResult(exportToMermaid(api.getSceneElements()))
+    setMermaidModalOpen(true)
   }
 
   function startPresentation(presentBoards: Board[]): void {
@@ -349,6 +361,9 @@ function App() {
                     <button className="export-menu-item" onClick={() => handleExport('pdf')}>
                       PDF
                     </button>
+                    <button className="export-menu-item" onClick={handleMermaidExport}>
+                      Mermaid
+                    </button>
                   </div>
                 )}
               </div>
@@ -380,6 +395,9 @@ function App() {
         initialIndex={presentation.index}
         onExit={() => setPresentation(null)}
       />
+    )}
+    {mermaidModalOpen && (
+      <MermaidExportModal result={mermaidResult} onClose={() => setMermaidModalOpen(false)} />
     )}
     </>
   )
