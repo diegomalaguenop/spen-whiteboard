@@ -5,6 +5,7 @@ import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { AppState } from '@excalidraw/excalidraw/types'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 import { exportBoardAsPdf, exportBoardAsPng, exportBoardAsSvg } from './export'
+import { TECHNICAL_STENCILS } from './stencils'
 import './App.css'
 
 interface Board {
@@ -379,6 +380,7 @@ function App() {
                 onChange={handleCanvasChange}
                 excalidrawAPI={(api) => {
                   excalidrawAPIRef.current = api
+                  void api.updateLibrary({ libraryItems: TECHNICAL_STENCILS, merge: true })
                 }}
                 theme="dark"
               />
