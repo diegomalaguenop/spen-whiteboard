@@ -58,7 +58,12 @@ export async function notionUploadFile(token: string, blob: Blob, filename: stri
     }),
   })
   if (!response.ok) {
-    throw new NotionApiError(response.status, 'No se pudo subir la imagen a Notion')
+    const data: unknown = await response.json().catch(() => null)
+    const message =
+      typeof data === 'object' && data !== null && 'message' in data
+        ? String((data as { message: unknown }).message)
+        : `No se pudo subir la imagen a Notion (error ${response.status})`
+    throw new NotionApiError(response.status, message)
   }
   return created.id
 }

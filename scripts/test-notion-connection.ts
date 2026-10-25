@@ -162,10 +162,61 @@ async function main(): Promise<void> {
   logResult(testPage)
   if (testPage.status !== 200) fail('crear página de prueba (POST /v1/pages)', testPage)
 
-  console.log('\n✅ Todo el flujo funcionó de punta a punta (llamando directo a Notion). Revisá la página de Notion.')
+  logStep('4. Subir una imagen de prueba (como hace notionUploadFile) y crear una página con bloque de imagen')
+  const fileUploadCreated = await callNotion('POST', '/v1/file_uploads', {
+    filename: 'test.png',
+    content_type: 'image/png',
+  })
+  logResult(fileUploadCreated)
+  if (fileUploadCreated.status !== 200) fail('crear file upload (POST /v1/file_uploads)', fileUploadCreated)
+  const fileUploadId = (fileUploadCreated.body as { id: string }).id
+
+  console.log(`\nMandando los bytes a /v1/file_uploads/${fileUploadId}/send ...`)
+  const pngBytes = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    'base64'
+  )
+  const form = new FormData()
+  form.append('file', new Blob([pngBytes], { type: 'image/png' }), 'test.png')
+  const sendResponse = await fetch(`${NOTION_API_BASE}/v1/file_uploads/${fileUploadId}/send`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Notion-Version': NOTION_VERSION },
+    body: form,
+  })
+  const sendText = await sendResponse.text()
+  let sendBody: unknown
+  try {
+    sendBody = JSON.parse(sendText)
+  } catch {
+    sendBody = sendText
+  }
+  console.log(`status: ${sendResponse.status}`)
+  console.log(JSON.stringify(sendBody, null, 2))
+  if (sendResponse.status !== 200) fail('mandar bytes (POST /v1/file_uploads/{id}/send)', { status: sendResponse.status, body: sendBody })
+
+  const imagePage = await callNotion('POST', '/v1/pages', {
+    parent: { type: 'data_source_id', data_source_id: dataSourceId },
+    properties: {
+      Nombre: { title: [{ text: { content: 'Prueba de conexión (con imagen)' } }] },
+      Proyecto: { select: { name: 'Test' } },
+      'Última edición': { date: { start: new Date().toISOString() } },
+      'Board ID': { rich_text: [{ text: { content: 'test-connection-script-image' } }] },
+    },
+    children: [
+      {
+        object: 'block',
+        type: 'image',
+        image: { type: 'file_upload', file_upload: { id: fileUploadId } },
+      },
+    ],
+  })
+  logResult(imagePage)
+  if (imagePage.status !== 200) fail('crear página con imagen (POST /v1/pages)', imagePage)
+
+  console.log('\n✅ Todo el flujo funcionó de punta a punta, incluida la subida de imagen (llamando directo a Notion). Revisá la página de Notion.')
 
   if (proxyUrl) {
-    logStep('4. Repetir la búsqueda a través del proxy de Vercel, para comparar')
+    logStep('5. Repetir la búsqueda a través del proxy de Vercel, para comparar')
     const proxyEndpoint = `${proxyUrl.replace(/\/$/, '')}/api/notion-proxy`
     console.log(`Llamando a: ${proxyEndpoint}`)
     const proxyResponse = await fetch(proxyEndpoint, {
