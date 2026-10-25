@@ -25,7 +25,8 @@ interface NotionDatabaseObject {
 interface NotionSearchResult {
   id: string
   object: string
-  parent?: { type: string; page_id?: string }
+  parent?: { type: string; database_id?: string }
+  database_parent?: { type: string; page_id?: string }
 }
 
 interface NotionSearchResponse {
@@ -102,16 +103,15 @@ async function findExistingDatabase(
 ): Promise<{ databaseId: string; dataSourceId: string } | null> {
   const search = await notionRequest<NotionSearchResponse>(token, 'POST', '/v1/search', {
     query: DATABASE_TITLE,
-    filter: { property: 'object', value: 'database' },
+    filter: { property: 'object', value: 'data_source', in_trash: false },
   })
   const match = search.results.find(
-    (r) => r.parent?.type === 'page_id' && normalizeId(r.parent.page_id ?? '') === normalizeId(parentPageId)
+    (r) =>
+      r.database_parent?.type === 'page_id' &&
+      normalizeId(r.database_parent.page_id ?? '') === normalizeId(parentPageId)
   )
-  if (!match) return null
-  const database = await notionRequest<NotionDatabaseObject>(token, 'GET', `/v1/databases/${match.id}`)
-  const dataSourceId = database.data_sources?.[0]?.id
-  if (!dataSourceId) return null
-  return { databaseId: database.id, dataSourceId }
+  if (!match?.parent?.database_id) return null
+  return { databaseId: match.parent.database_id, dataSourceId: match.id }
 }
 
 async function createDatabase(
