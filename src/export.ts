@@ -62,9 +62,13 @@ async function renderBoardToCanvas(api: ExcalidrawImperativeAPI): Promise<HTMLCa
 }
 
 export async function exportBoardAsPng(api: ExcalidrawImperativeAPI, boardName: string): Promise<void> {
-  const canvas = await renderBoardToCanvas(api)
-  const blob = await canvasToBlob(canvas)
+  const blob = await getBoardPngBlob(api)
   downloadBlob(blob, `${sanitizeFilename(boardName)}.png`)
+}
+
+export async function getBoardPngBlob(api: ExcalidrawImperativeAPI): Promise<Blob> {
+  const canvas = await renderBoardToCanvas(api)
+  return canvasToBlob(canvas)
 }
 
 export async function exportBoardAsSvg(api: ExcalidrawImperativeAPI, boardName: string): Promise<void> {

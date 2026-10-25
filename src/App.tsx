@@ -4,19 +4,33 @@ import '@excalidraw/excalidraw/index.css'
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { AppState } from '@excalidraw/excalidraw/types'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
-import { exportBoardAsPdf, exportBoardAsPng, exportBoardAsSvg } from './export'
+import { exportBoardAsPdf, exportBoardAsPng, exportBoardAsSvg, getBoardPngBlob } from './export'
 import { TECHNICAL_STENCILS } from './stencils'
 import type { Board, Project } from './types'
 import { canvasKey, loadCanvasData, saveCanvasData } from './canvasStorage'
 import PresentationView from './PresentationView'
 import { exportToMermaid, type MermaidExportResult } from './mermaidExport'
 import MermaidExportModal from './MermaidExportModal'
+import type { NotionConfig } from './notionTypes'
+import {
+  loadNotionConfig,
+  saveNotionConfig,
+  clearNotionConfig,
+  loadNotionLinks,
+  saveNotionLinks,
+  saveNotionLink,
+} from './notionStorage'
+import { pushBoardToNotion, pullBoardsFromNotion, getRemoteUpdatedAt, fetchRemoteCanvasData } from './notionSync'
+import NotionPanel from './NotionPanel'
 import './App.css'
 
 const BOARDS_KEY = 'spen-whiteboard:boards'
 const PROJECTS_KEY = 'spen-whiteboard:projects'
 const CANVAS_SAVE_DEBOUNCE_MS = 500
+const NOTION_SYNC_DEBOUNCE_MS = 4000
 const DEFAULT_PROJECT_NAMES = ['FIN700', 'AdaptFit', 'UNAB', 'MTG', 'General']
+
+type NotionStatus = 'disconnected' | 'syncing' | 'synced' | 'error'
 
 function loadBoards(): Board[] {
   try {
@@ -70,8 +84,13 @@ function App() {
   const [presentation, setPresentation] = useState<{ boards: Board[]; index: number } | null>(null)
   const [mermaidModalOpen, setMermaidModalOpen] = useState(false)
   const [mermaidResult, setMermaidResult] = useState<MermaidExportResult | null>(null)
+  const [notionConfig, setNotionConfig] = useState<NotionConfig | null>(loadNotionConfig)
+  const [notionStatus, setNotionStatus] = useState<NotionStatus>('disconnected')
+  const [notionPanelOpen, setNotionPanelOpen] = useState(false)
   const saveTimeoutRef = useRef<number | null>(null)
+  const notionSyncTimeoutRef = useRef<number | null>(null)
   const excalidrawAPIRef = useRef<ExcalidrawImperativeAPI | null>(null)
+  const boardsRef = useRef<Board[]>(boards)
 
   useEffect(() => {
     saveBoards(boards)
@@ -81,16 +100,47 @@ function App() {
     saveProjects(projects)
   }, [projects])
 
+  useEffect(() => {
+    boardsRef.current = boards
+  }, [boards])
+
+  useEffect(() => {
+    if (!notionConfig) {
+      setNotionStatus('disconnected')
+      return
+    }
+    setNotionStatus('syncing')
+    const localIds = new Set(boardsRef.current.map((b) => b.id))
+    pullBoardsFromNotion(notionConfig, localIds)
+      .then((pulled) => {
+        if (pulled.length > 0) {
+          setBoards((prev) => [...pulled.map((p) => p.board), ...prev])
+          const links = loadNotionLinks()
+          for (const p of pulled) {
+            if (p.canvasData) {
+              localStorage.setItem(canvasKey(p.board.id), JSON.stringify(p.canvasData))
+            }
+            links[p.board.id] = p.link
+          }
+          saveNotionLinks(links)
+        }
+        setNotionStatus('synced')
+      })
+      .catch(() => setNotionStatus('error'))
+  }, [notionConfig])
+
   const activeBoard = boards.find((b) => b.id === activeId) ?? null
   const visibleBoards = boards.filter((b) => normalize(b.name).includes(normalize(searchQuery)))
 
   function createBoard() {
     const name = newBoardName.trim() || 'Sin título'
+    const now = Date.now()
     const board: Board = {
       id: crypto.randomUUID(),
       name,
       project: newBoardProject,
-      createdAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
     }
     setBoards((prev) => [board, ...prev])
     setActiveId(board.id)
@@ -107,9 +157,69 @@ function App() {
   function commitRename(id: string): void {
     const name = editingName.trim()
     if (name) {
-      setBoards((prev) => prev.map((b) => (b.id === id ? { ...b, name } : b)))
+      setBoards((prev) => prev.map((b) => (b.id === id ? { ...b, name, updatedAt: Date.now() } : b)))
     }
     setEditingBoardId(null)
+  }
+
+  async function selectBoard(board: Board): Promise<void> {
+    if (board.id === activeId) return
+    if (notionConfig) {
+      const link = loadNotionLinks()[board.id]
+      if (link) {
+        try {
+          const remoteUpdatedAt = await getRemoteUpdatedAt(notionConfig, link.notionPageId)
+          if (remoteUpdatedAt > board.updatedAt) {
+            const downloadRemote = confirm(
+              `Esta pizarra tiene cambios más nuevos en Notion (${new Date(remoteUpdatedAt).toLocaleString()}). ¿Descargarlos y sobreescribir lo local?`
+            )
+            if (downloadRemote) {
+              const canvasData = await fetchRemoteCanvasData(notionConfig, link)
+              if (canvasData) {
+                localStorage.setItem(canvasKey(board.id), JSON.stringify(canvasData))
+              }
+              setBoards((prev) =>
+                prev.map((b) => (b.id === board.id ? { ...b, updatedAt: remoteUpdatedAt } : b))
+              )
+            }
+          }
+        } catch {
+          // si falla el chequeo de conflicto, no bloqueamos la apertura de la pizarra
+        }
+      }
+    }
+    setActiveId(board.id)
+  }
+
+  async function syncBoardToNotion(boardId: string): Promise<void> {
+    if (!notionConfig) return
+    const api = excalidrawAPIRef.current
+    if (!api) return
+    const board = boardsRef.current.find((b) => b.id === boardId)
+    if (!board) return
+    setNotionStatus('syncing')
+    try {
+      const canvasData = loadCanvasData(boardId)
+      const pngBlob = await getBoardPngBlob(api)
+      const existingLink = loadNotionLinks()[boardId] ?? null
+      const newLink = await pushBoardToNotion(notionConfig, board, canvasData, pngBlob, existingLink)
+      saveNotionLink(boardId, newLink)
+      setNotionStatus('synced')
+    } catch {
+      setNotionStatus('error')
+    }
+  }
+
+  function handleNotionConnected(config: NotionConfig): void {
+    setNotionConfig(config)
+    saveNotionConfig(config)
+    setNotionPanelOpen(false)
+  }
+
+  function handleNotionDisconnect(): void {
+    clearNotionConfig()
+    setNotionConfig(null)
+    setNotionPanelOpen(false)
   }
 
   function addProject(): void {
@@ -165,7 +275,15 @@ function App() {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
     saveTimeoutRef.current = window.setTimeout(() => {
       saveCanvasData(boardId, elements, appState)
+      setBoards((prev) => prev.map((b) => (b.id === boardId ? { ...b, updatedAt: Date.now() } : b)))
     }, CANVAS_SAVE_DEBOUNCE_MS)
+
+    if (notionConfig) {
+      if (notionSyncTimeoutRef.current) clearTimeout(notionSyncTimeoutRef.current)
+      notionSyncTimeoutRef.current = window.setTimeout(() => {
+        void syncBoardToNotion(boardId)
+      }, NOTION_SYNC_DEBOUNCE_MS)
+    }
   }
 
   return (
@@ -183,6 +301,14 @@ function App() {
               ⮜
             </button>
           </div>
+
+          <button className={`notion-status notion-status-${notionStatus}`} onClick={() => setNotionPanelOpen(true)}>
+            <span className="notion-status-dot" />
+            {notionStatus === 'disconnected' && 'No conectado'}
+            {notionStatus === 'syncing' && 'Sincronizando...'}
+            {notionStatus === 'synced' && 'Sincronizado con Notion'}
+            {notionStatus === 'error' && 'Error de sync'}
+          </button>
 
           <div className="new-board">
             <select
@@ -262,7 +388,7 @@ function App() {
                       <div
                         key={b.id}
                         className={`board-item ${b.id === activeId ? 'active' : ''}`}
-                        onClick={() => setActiveId(b.id)}
+                        onClick={() => void selectBoard(b)}
                       >
                         {b.id === editingBoardId ? (
                           <input
@@ -398,6 +524,14 @@ function App() {
     )}
     {mermaidModalOpen && (
       <MermaidExportModal result={mermaidResult} onClose={() => setMermaidModalOpen(false)} />
+    )}
+    {notionPanelOpen && (
+      <NotionPanel
+        config={notionConfig}
+        onConnected={handleNotionConnected}
+        onDisconnect={handleNotionDisconnect}
+        onClose={() => setNotionPanelOpen(false)}
+      />
     )}
     </>
   )

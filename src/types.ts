@@ -3,6 +3,7 @@ export interface Board {
   name: string
   project: string
   createdAt: number
+  updatedAt: number
 }
 
 export interface Project {
