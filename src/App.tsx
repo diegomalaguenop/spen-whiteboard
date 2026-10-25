@@ -86,6 +86,7 @@ function App() {
   const [mermaidResult, setMermaidResult] = useState<MermaidExportResult | null>(null)
   const [notionConfig, setNotionConfig] = useState<NotionConfig | null>(loadNotionConfig)
   const [notionStatus, setNotionStatus] = useState<NotionStatus>('disconnected')
+  const [notionError, setNotionError] = useState<string | null>(null)
   const [notionPanelOpen, setNotionPanelOpen] = useState(false)
   const saveTimeoutRef = useRef<number | null>(null)
   const notionSyncTimeoutRef = useRef<number | null>(null)
@@ -110,6 +111,7 @@ function App() {
       return
     }
     setNotionStatus('syncing')
+    setNotionError(null)
     const localIds = new Set(boardsRef.current.map((b) => b.id))
     pullBoardsFromNotion(notionConfig, localIds)
       .then((pulled) => {
@@ -126,7 +128,10 @@ function App() {
         }
         setNotionStatus('synced')
       })
-      .catch(() => setNotionStatus('error'))
+      .catch((error: unknown) => {
+        setNotionStatus('error')
+        setNotionError(error instanceof Error ? error.message : 'Error desconocido al conectar con Notion')
+      })
   }, [notionConfig])
 
   const activeBoard = boards.find((b) => b.id === activeId) ?? null
@@ -198,6 +203,7 @@ function App() {
     const board = boardsRef.current.find((b) => b.id === boardId)
     if (!board) return
     setNotionStatus('syncing')
+    setNotionError(null)
     try {
       const canvasData = loadCanvasData(boardId)
       const pngBlob = await getBoardPngBlob(api)
@@ -205,8 +211,9 @@ function App() {
       const newLink = await pushBoardToNotion(notionConfig, board, canvasData, pngBlob, existingLink)
       saveNotionLink(boardId, newLink)
       setNotionStatus('synced')
-    } catch {
+    } catch (error: unknown) {
       setNotionStatus('error')
+      setNotionError(error instanceof Error ? error.message : 'Error desconocido al sincronizar')
     }
   }
 
@@ -219,6 +226,7 @@ function App() {
   function handleNotionDisconnect(): void {
     clearNotionConfig()
     setNotionConfig(null)
+    setNotionError(null)
     setNotionPanelOpen(false)
   }
 
@@ -302,13 +310,20 @@ function App() {
             </button>
           </div>
 
-          <button className={`notion-status notion-status-${notionStatus}`} onClick={() => setNotionPanelOpen(true)}>
+          <button
+            className={`notion-status notion-status-${notionStatus}`}
+            onClick={() => setNotionPanelOpen(true)}
+            title={notionError ?? undefined}
+          >
             <span className="notion-status-dot" />
             {notionStatus === 'disconnected' && 'No conectado'}
             {notionStatus === 'syncing' && 'Sincronizando...'}
             {notionStatus === 'synced' && 'Sincronizado con Notion'}
             {notionStatus === 'error' && 'Error de sync'}
           </button>
+          {notionStatus === 'error' && notionError && (
+            <p className="notion-error-text">{notionError}</p>
+          )}
 
           <div className="new-board">
             <select

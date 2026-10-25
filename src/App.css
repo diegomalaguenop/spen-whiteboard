@@ -105,6 +105,14 @@ html, body, #root {
   background: #ff6b6b;
 }
 
+.notion-error-text {
+  color: #ff6b6b;
+  font-size: 11px;
+  margin: -8px 0 12px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
 .new-board {
   display: flex;
   flex-direction: column;
