@@ -1,0 +1,201 @@
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+.app-shell {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  background: #1a1a1e;
+  color: #eee;
+}
+
+.sidebar {
+  width: 260px;
+  min-width: 260px;
+  background: #151517;
+  border-right: 1px solid #2a2a2e;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.sidebar-header h1 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+  color: #fff;
+}
+
+.icon-btn {
+  background: transparent;
+  border: none;
+  color: #999;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.icon-btn:hover {
+  background: #2a2a2e;
+  color: #fff;
+}
+
+.open-sidebar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 10;
+  background: #151517;
+  border: 1px solid #2a2a2e;
+}
+
+.new-board {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #2a2a2e;
+}
+
+.new-board select,
+.new-board input {
+  background: #1f1f23;
+  border: 1px solid #333;
+  color: #eee;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.new-board button {
+  background: #4c6ef5;
+  border: none;
+  color: white;
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-top: 2px;
+}
+
+.new-board button:hover {
+  background: #3b5bdb;
+}
+
+.board-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.project-group {
+  margin-bottom: 14px;
+}
+
+.project-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #777;
+  margin-bottom: 6px;
+  padding-left: 4px;
+}
+
+.board-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #ccc;
+}
+
+.board-item:hover {
+  background: #1f1f23;
+}
+
+.board-item.active {
+  background: #28304d;
+  color: #fff;
+}
+
+.board-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.delete-btn {
+  background: transparent;
+  border: none;
+  color: #777;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  visibility: hidden;
+}
+
+.board-item:hover .delete-btn {
+  visibility: visible;
+}
+
+.delete-btn:hover {
+  color: #ff6b6b;
+}
+
+.empty-hint {
+  color: #777;
+  font-size: 13px;
+  padding: 8px 4px;
+}
+
+.canvas-area {
+  flex: 1;
+  position: relative;
+  height: 100vh;
+}
+
+.excalidraw-wrapper {
+  height: 100%;
+  width: 100%;
+}
+
+.excalidraw {
+  --color-primary: #4c6ef5;
+  --color-primary-darker: #3b5bdb;
+  --color-primary-darkest: #2f49ad;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  color: #888;
+}
+
+.empty-state h2 {
+  color: #ccc;
+  margin-bottom: 8px;
+}
