@@ -6,30 +6,15 @@ import type { AppState } from '@excalidraw/excalidraw/types'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 import { exportBoardAsPdf, exportBoardAsPng, exportBoardAsSvg } from './export'
 import { TECHNICAL_STENCILS } from './stencils'
+import type { Board, Project } from './types'
+import { canvasKey, loadCanvasData, saveCanvasData } from './canvasStorage'
+import PresentationView from './PresentationView'
 import './App.css'
-
-interface Board {
-  id: string
-  name: string
-  project: string
-  createdAt: number
-}
-
-interface Project {
-  id: string
-  name: string
-}
 
 const BOARDS_KEY = 'spen-whiteboard:boards'
 const PROJECTS_KEY = 'spen-whiteboard:projects'
-const CANVAS_KEY_PREFIX = 'spen-whiteboard:canvas:'
 const CANVAS_SAVE_DEBOUNCE_MS = 500
 const DEFAULT_PROJECT_NAMES = ['FIN700', 'AdaptFit', 'UNAB', 'MTG', 'General']
-
-interface StoredCanvasData {
-  elements: readonly ExcalidrawElement[]
-  appState: Partial<AppState>
-}
 
 function loadBoards(): Board[] {
   try {
@@ -65,36 +50,6 @@ function normalize(text: string): string {
     .toLowerCase()
 }
 
-function canvasKey(boardId: string): string {
-  return `${CANVAS_KEY_PREFIX}${boardId}`
-}
-
-function loadCanvasData(boardId: string): StoredCanvasData | null {
-  try {
-    const raw = localStorage.getItem(canvasKey(boardId))
-    return raw ? (JSON.parse(raw) as StoredCanvasData) : null
-  } catch {
-    return null
-  }
-}
-
-function saveCanvasData(
-  boardId: string,
-  elements: readonly ExcalidrawElement[],
-  appState: AppState
-): void {
-  const curatedAppState: Partial<AppState> = {
-    viewBackgroundColor: appState.viewBackgroundColor,
-    scrollX: appState.scrollX,
-    scrollY: appState.scrollY,
-    zoom: appState.zoom,
-  }
-  localStorage.setItem(
-    canvasKey(boardId),
-    JSON.stringify({ elements, appState: curatedAppState })
-  )
-}
-
 function App() {
   const [boards, setBoards] = useState<Board[]>(loadBoards)
   const [projects, setProjects] = useState<Project[]>(loadProjects)
@@ -110,6 +65,7 @@ function App() {
   const [editingName, setEditingName] = useState('')
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [presentation, setPresentation] = useState<{ boards: Board[]; index: number } | null>(null)
   const saveTimeoutRef = useRef<number | null>(null)
   const excalidrawAPIRef = useRef<ExcalidrawImperativeAPI | null>(null)
 
@@ -186,6 +142,11 @@ function App() {
     }
   }
 
+  function startPresentation(presentBoards: Board[]): void {
+    if (presentBoards.length === 0) return
+    setPresentation({ boards: presentBoards, index: 0 })
+  }
+
   function handleCanvasChange(elements: readonly ExcalidrawElement[], appState: AppState): void {
     if (!activeBoard) return
     const boardId = activeBoard.id
@@ -196,6 +157,7 @@ function App() {
   }
 
   return (
+    <>
     <div className="app-shell">
       {sidebarOpen && (
         <aside className="sidebar">
@@ -259,6 +221,18 @@ function App() {
                 <div key={project.id} className="project-group">
                   <div className="project-label-row">
                     <span className="project-label">{project.name}</span>
+                    {projectBoards.length > 0 && (
+                      <button
+                        className="present-project-btn"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          startPresentation(projectBoards)
+                        }}
+                        title="Presentar proyecto"
+                      >
+                        ▶
+                      </button>
+                    )}
                     {!isDefault && projectBoards.length === 0 && (
                       <button
                         className="delete-project-btn"
@@ -350,6 +324,12 @@ function App() {
                 </button>
               )}
               <span className="canvas-header-title">{activeBoard.name}</span>
+              <button
+                className="present-btn"
+                onClick={() => startPresentation([activeBoard])}
+              >
+                ▶ Presentar
+              </button>
               <div className="export-menu">
                 <button
                   className="export-menu-btn"
@@ -394,6 +374,14 @@ function App() {
         )}
       </main>
     </div>
+    {presentation && (
+      <PresentationView
+        boards={presentation.boards}
+        initialIndex={presentation.index}
+        onExit={() => setPresentation(null)}
+      />
+    )}
+    </>
   )
 }
 
