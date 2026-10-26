@@ -152,7 +152,13 @@ export async function pushBoardToNotion(
   const json = JSON.stringify(canvasData ?? { elements: [], appState: {} })
   const codeRichText = chunkRichText(json)
 
-  if (!existingLink) {
+  // Un link guardado con codeBlockId/imageBlockId vacíos (ej. de una versión vieja de
+  // pullBoardsFromNotion que los dejaba en '' cuando no encontraba los bloques) no sirve para
+  // actualizar nada — se trata como si no existiera y se crea una página nueva en vez de
+  // armar un PATCH a una URL rota.
+  const hasUsableLink = !!existingLink && !!existingLink.codeBlockId && !!existingLink.imageBlockId
+
+  if (!hasUsableLink) {
     const fileUploadId = await notionUploadFile(config.token, pngBlob, `${board.id}.png`)
     const page = await notionRequest<NotionPageObject>(config.token, 'POST', '/v1/pages', {
       parent: { type: 'data_source_id', data_source_id: config.dataSourceId },
@@ -240,14 +246,20 @@ export async function pullBoardsFromNotion(
     )
     const codeBlock = children.results.find((b) => b.type === 'code')
     const imageBlock = children.results.find((b) => b.type === 'image')
+    if (!codeBlock || !imageBlock) {
+      // No tiene la estructura que arma pushBoardToNotion (código + imagen) — no es una
+      // pizarra real de la app (ej. una página de prueba creada a mano en la database), así
+      // que no se trae como board local: hacerlo guardaría un link con codeBlockId/imageBlockId
+      // vacíos, y la próxima sync intentaría un PATCH a "/v1/blocks/" sin id, que Notion rechaza.
+      continue
+    }
+
+    const json = codeBlock.code?.rich_text.map((rt) => rt.plain_text ?? rt.text.content).join('') ?? ''
     let canvasData: StoredCanvasData | null = null
-    if (codeBlock?.code) {
-      const json = codeBlock.code.rich_text.map((rt) => rt.plain_text ?? rt.text.content).join('')
-      try {
-        canvasData = JSON.parse(json) as StoredCanvasData
-      } catch {
-        canvasData = null
-      }
+    try {
+      canvasData = JSON.parse(json) as StoredCanvasData
+    } catch {
+      canvasData = null
     }
 
     pulled.push({
@@ -255,8 +267,8 @@ export async function pullBoardsFromNotion(
       canvasData,
       link: {
         notionPageId: page.id,
-        codeBlockId: codeBlock?.id ?? '',
-        imageBlockId: imageBlock?.id ?? '',
+        codeBlockId: codeBlock.id,
+        imageBlockId: imageBlock.id,
         remoteUpdatedAt,
       },
     })

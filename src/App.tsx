@@ -182,13 +182,11 @@ function App() {
   }
 
   function flushPendingNotionSync(): void {
-    console.log('🔵 [Notion] flushPendingNotionSync llamado. pendingBoardId=', pendingNotionBoardIdRef.current)
     if (notionSyncTimeoutRef.current && pendingNotionBoardIdRef.current) {
       clearTimeout(notionSyncTimeoutRef.current)
       notionSyncTimeoutRef.current = null
       const boardId = pendingNotionBoardIdRef.current
       pendingNotionBoardIdRef.current = null
-      console.log('🔵 [Notion] Flusheando sync pendiente para board', boardId)
       void syncBoardToNotion(boardId)
     }
   }
@@ -225,44 +223,21 @@ function App() {
   }
 
   async function syncBoardToNotion(boardId: string): Promise<void> {
-    console.log('🔵 [Notion] syncBoardToNotion() llamado para boardId=', boardId)
-    if (!notionConfig) {
-      console.log('🔴 [Notion] ABORTA: notionConfig es null/undefined. No hay conexión activa.')
-      return
-    }
+    if (!notionConfig) return
     const api = excalidrawAPIRef.current
-    if (!api) {
-      console.log('🔴 [Notion] ABORTA: excalidrawAPIRef.current es null (el editor no está montado).')
-      return
-    }
+    if (!api) return
     const board = boardsRef.current.find((b) => b.id === boardId)
-    if (!board) {
-      console.log('🔴 [Notion] ABORTA: no se encontró el board', boardId, 'en boardsRef.current')
-      return
-    }
-    console.log('🔵 [Notion] Config:', {
-      parentPageId: notionConfig.parentPageId,
-      databaseId: notionConfig.databaseId,
-      dataSourceId: notionConfig.dataSourceId,
-    })
-    console.log('🔵 [Notion] Pusheando board:', board.name, '(id=' + board.id + ')')
+    if (!board) return
     setNotionStatus('syncing')
     setNotionError(null)
     try {
       const canvasData = loadCanvasData(boardId)
-      console.log('🔵 [Notion] canvasData cargado de localStorage:', canvasData ? 'sí' : 'no (null)')
       const pngBlob = await getBoardPngBlob(api)
-      console.log('🔵 [Notion] PNG generado, tamaño:', pngBlob.size, 'bytes')
       const existingLink = loadNotionLinks()[boardId] ?? null
-      console.log('🔵 [Notion] existingLink:', existingLink)
-      console.log('🔵 [Notion] Llamando a pushBoardToNotion (fetch al proxy)...')
       const newLink = await pushBoardToNotion(notionConfig, board, canvasData, pngBlob, existingLink)
-      console.log('🟢 [Notion] pushBoardToNotion resolvió OK. newLink:', newLink)
       saveNotionLink(boardId, newLink)
       setNotionStatus('synced')
-      console.log('🟢 [Notion] Sync completo para', board.name)
     } catch (error: unknown) {
-      console.log('🔴 [Notion] pushBoardToNotion tiró un error:', error)
       setNotionStatus('error')
       setNotionError(error instanceof Error ? error.message : 'Error desconocido al sincronizar')
     }
@@ -338,21 +313,12 @@ function App() {
     }, CANVAS_SAVE_DEBOUNCE_MS)
 
     if (notionConfig) {
-      console.log(
-        '🔵 [Notion] handleCanvasChange: notionConfig presente, agendando push en',
-        NOTION_SYNC_DEBOUNCE_MS,
-        'ms para board',
-        boardId
-      )
       if (notionSyncTimeoutRef.current) clearTimeout(notionSyncTimeoutRef.current)
       pendingNotionBoardIdRef.current = boardId
       notionSyncTimeoutRef.current = window.setTimeout(() => {
-        console.log('🔵 [Notion] Debounce de 4s cumplido, disparando syncBoardToNotion para', boardId)
         pendingNotionBoardIdRef.current = null
         void syncBoardToNotion(boardId)
       }, NOTION_SYNC_DEBOUNCE_MS)
-    } else {
-      console.log('🟡 [Notion] handleCanvasChange: notionConfig es null, no se agenda push a Notion.')
     }
   }
 
