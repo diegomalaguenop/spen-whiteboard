@@ -206,7 +206,7 @@ async function main(): Promise<void> {
       {
         object: 'block',
         type: 'image',
-        image: { type: 'file_upload', file_upload: { id: fileUploadId } },
+        image: { file_upload: { id: fileUploadId } },
       },
     ],
   })
@@ -215,8 +215,40 @@ async function main(): Promise<void> {
 
   console.log('\n✅ Todo el flujo funcionó de punta a punta, incluida la subida de imagen (llamando directo a Notion). Revisá la página de Notion.')
 
+  logStep('5. Actualizar (PATCH) ese mismo bloque de imagen con un segundo upload — la rama que nunca se había probado')
+  const imagePageId = (imagePage.body as { id: string }).id
+  const imagePageChildren = await callNotion('GET', `/v1/blocks/${imagePageId}/children`)
+  const imageBlockId = (imagePageChildren.body as { results?: { id: string; type: string }[] }).results?.find(
+    (b) => b.type === 'image'
+  )?.id
+  if (!imageBlockId) {
+    console.log('⚠️  No se pudo leer el id del bloque de imagen recién creado desde la respuesta, se omite este paso.')
+  } else {
+    const secondUpload = await callNotion('POST', '/v1/file_uploads', {
+      filename: 'test2.png',
+      content_type: 'image/png',
+    })
+    if (secondUpload.status !== 200) fail('crear segundo file upload', secondUpload)
+    const secondUploadId = (secondUpload.body as { id: string }).id
+    const secondForm = new FormData()
+    secondForm.append('file', new Blob([pngBytes], { type: 'image/png' }), 'test2.png')
+    const secondSend = await fetch(`${NOTION_API_BASE}/v1/file_uploads/${secondUploadId}/send`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Notion-Version': NOTION_VERSION },
+      body: secondForm,
+    })
+    if (secondSend.status !== 200) fail('mandar bytes del segundo upload', { status: secondSend.status, body: await secondSend.text() })
+
+    const patchResult = await callNotion('PATCH', `/v1/blocks/${imageBlockId}`, {
+      image: { file_upload: { id: secondUploadId } },
+    })
+    logResult(patchResult)
+    if (patchResult.status !== 200) fail('actualizar bloque de imagen (PATCH /v1/blocks/{id})', patchResult)
+    console.log('\n✅ El PATCH al bloque de imagen existente también funcionó.')
+  }
+
   if (proxyUrl) {
-    logStep('5. Repetir la búsqueda a través del proxy de Vercel, para comparar')
+    logStep('6. Repetir la búsqueda a través del proxy de Vercel, para comparar')
     const proxyEndpoint = `${proxyUrl.replace(/\/$/, '')}/api/notion-proxy`
     console.log(`Llamando a: ${proxyEndpoint}`)
     const proxyResponse = await fetch(proxyEndpoint, {

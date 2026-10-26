@@ -173,7 +173,7 @@ export async function pushBoardToNotion(
         {
           object: 'block',
           type: 'image',
-          image: { type: 'file_upload', file_upload: { id: fileUploadId } },
+          image: { file_upload: { id: fileUploadId } },
         },
       ],
     })
@@ -207,7 +207,7 @@ export async function pushBoardToNotion(
   })
   const fileUploadId = await notionUploadFile(config.token, pngBlob, `${board.id}.png`)
   await notionRequest(config.token, 'PATCH', `/v1/blocks/${existingLink.imageBlockId}`, {
-    image: { type: 'file_upload', file_upload: { id: fileUploadId } },
+    image: { file_upload: { id: fileUploadId } },
   })
 
   return { ...existingLink, remoteUpdatedAt: board.updatedAt }
