@@ -90,6 +90,8 @@ function App() {
   const [notionPanelOpen, setNotionPanelOpen] = useState(false)
   const saveTimeoutRef = useRef<number | null>(null)
   const notionSyncTimeoutRef = useRef<number | null>(null)
+  const pendingNotionBoardIdRef = useRef<string | null>(null)
+  const flushPendingNotionSyncRef = useRef<() => void>(() => {})
   const excalidrawAPIRef = useRef<ExcalidrawImperativeAPI | null>(null)
   const boardsRef = useRef<Board[]>(boards)
 
@@ -104,6 +106,18 @@ function App() {
   useEffect(() => {
     boardsRef.current = boards
   }, [boards])
+
+  useEffect(() => {
+    function handleVisibilityChange(): void {
+      if (document.visibilityState === 'hidden') flushPendingNotionSyncRef.current()
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('pagehide', handleVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('pagehide', handleVisibilityChange)
+    }
+  }, [])
 
   useEffect(() => {
     if (!notionConfig) {
@@ -167,8 +181,20 @@ function App() {
     setEditingBoardId(null)
   }
 
+  function flushPendingNotionSync(): void {
+    if (notionSyncTimeoutRef.current && pendingNotionBoardIdRef.current) {
+      clearTimeout(notionSyncTimeoutRef.current)
+      notionSyncTimeoutRef.current = null
+      const boardId = pendingNotionBoardIdRef.current
+      pendingNotionBoardIdRef.current = null
+      void syncBoardToNotion(boardId)
+    }
+  }
+  flushPendingNotionSyncRef.current = flushPendingNotionSync
+
   async function selectBoard(board: Board): Promise<void> {
     if (board.id === activeId) return
+    flushPendingNotionSync()
     if (notionConfig) {
       const link = loadNotionLinks()[board.id]
       if (link) {
@@ -288,7 +314,9 @@ function App() {
 
     if (notionConfig) {
       if (notionSyncTimeoutRef.current) clearTimeout(notionSyncTimeoutRef.current)
+      pendingNotionBoardIdRef.current = boardId
       notionSyncTimeoutRef.current = window.setTimeout(() => {
+        pendingNotionBoardIdRef.current = null
         void syncBoardToNotion(boardId)
       }, NOTION_SYNC_DEBOUNCE_MS)
     }
