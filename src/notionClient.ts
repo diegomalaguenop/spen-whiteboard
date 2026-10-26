@@ -23,13 +23,22 @@ export async function notionRequest<T>(
   path: string,
   body?: unknown
 ): Promise<T> {
-  const response = await fetch(PROXY_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token, method, path, body }),
-  })
+  console.log('🔵 [Notion] fetch →', PROXY_URL, '| notion method/path:', method, path)
+  let response: Response
+  try {
+    response = await fetch(PROXY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, method, path, body }),
+    })
+  } catch (networkError: unknown) {
+    console.log('🔴 [Notion] fetch al proxy tiró un error de red/CORS (no llegó respuesta):', networkError)
+    throw networkError
+  }
+  console.log('🔵 [Notion] respuesta del proxy:', response.status, 'para', method, path)
   const data = await response.json()
   if (!response.ok) {
+    console.log('🔴 [Notion] respuesta no-ok, body:', data)
     const message =
       typeof data === 'object' && data !== null && 'message' in data
         ? String((data as { message: unknown }).message)
