@@ -15,9 +15,18 @@
 // No hardcodea ni pide el token por stdin — si falta alguna env var obligatoria, tira error
 // y no hace ningún request.
 
-const NOTION_VERSION = '2026-03-11'
+import {
+  NOTION_VERSION,
+  DATABASE_TITLE,
+  PROP_NAME,
+  PROP_PROJECT,
+  PROP_UPDATED_AT,
+  PROP_BOARD_ID,
+  normalizeId,
+  extractPageId,
+} from '../shared/notionSchema'
+
 const NOTION_API_BASE = 'https://api.notion.com'
-const DATABASE_TITLE = 'S Pen Whiteboard'
 
 const token = process.env.NOTION_TOKEN
 const rawPageId = process.env.NOTION_PAGE_ID
@@ -34,16 +43,7 @@ if (!rawPageId) {
   process.exit(1)
 }
 
-function normalizeId(id: string): string {
-  return id.replace(/-/g, '')
-}
-
-function extractPageId(input: string): string {
-  const match = input.match(/[0-9a-fA-F]{32}/)
-  return match ? match[0] : normalizeId(input)
-}
-
-const pageId = extractPageId(rawPageId)
+const pageId = normalizeId(extractPageId(rawPageId))
 
 interface StepResult {
   status: number
@@ -118,10 +118,10 @@ async function main(): Promise<void> {
       title: [{ type: 'text', text: { content: DATABASE_TITLE } }],
       initial_data_source: {
         properties: {
-          Nombre: { title: {} },
-          Proyecto: { select: { options: [] } },
-          'Última edición': { date: {} },
-          'Board ID': { rich_text: {} },
+          [PROP_NAME]: { title: {} },
+          [PROP_PROJECT]: { select: { options: [] } },
+          [PROP_UPDATED_AT]: { date: {} },
+          [PROP_BOARD_ID]: { rich_text: {} },
         },
       },
     })
@@ -143,10 +143,10 @@ async function main(): Promise<void> {
   const testPage = await callNotion('POST', '/v1/pages', {
     parent: { type: 'data_source_id', data_source_id: dataSourceId },
     properties: {
-      Nombre: { title: [{ text: { content: 'Prueba de conexión' } }] },
-      Proyecto: { select: { name: 'Test' } },
-      'Última edición': { date: { start: new Date().toISOString() } },
-      'Board ID': { rich_text: [{ text: { content: 'test-connection-script' } }] },
+      [PROP_NAME]: { title: [{ text: { content: 'Prueba de conexión' } }] },
+      [PROP_PROJECT]: { select: { name: 'Test' } },
+      [PROP_UPDATED_AT]: { date: { start: new Date().toISOString() } },
+      [PROP_BOARD_ID]: { rich_text: [{ text: { content: 'test-connection-script' } }] },
     },
     children: [
       {
@@ -197,10 +197,10 @@ async function main(): Promise<void> {
   const imagePage = await callNotion('POST', '/v1/pages', {
     parent: { type: 'data_source_id', data_source_id: dataSourceId },
     properties: {
-      Nombre: { title: [{ text: { content: 'Prueba de conexión (con imagen)' } }] },
-      Proyecto: { select: { name: 'Test' } },
-      'Última edición': { date: { start: new Date().toISOString() } },
-      'Board ID': { rich_text: [{ text: { content: 'test-connection-script-image' } }] },
+      [PROP_NAME]: { title: [{ text: { content: 'Prueba de conexión (con imagen)' } }] },
+      [PROP_PROJECT]: { select: { name: 'Test' } },
+      [PROP_UPDATED_AT]: { date: { start: new Date().toISOString() } },
+      [PROP_BOARD_ID]: { rich_text: [{ text: { content: 'test-connection-script-image' } }] },
     },
     children: [
       {

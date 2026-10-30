@@ -2,20 +2,13 @@ import { useState } from 'react'
 import type { NotionConfig } from './notionTypes'
 import { connectToNotion } from './notionSync'
 import { NotionApiError } from './notionClient'
+import { extractPageId } from '../shared/notionSchema'
 
 interface NotionPanelProps {
   config: NotionConfig | null
   onConnected: (config: NotionConfig) => void
   onDisconnect: () => void
   onClose: () => void
-}
-
-function extractPageId(input: string): string {
-  const trimmed = input.trim()
-  const match = trimmed.match(/[0-9a-fA-F]{32}/)
-  if (match) return match[0]
-  const dashed = trimmed.match(/[0-9a-fA-F-]{36}/)
-  return dashed ? dashed[0] : trimmed
 }
 
 function NotionPanel({ config, onConnected, onDisconnect, onClose }: NotionPanelProps) {

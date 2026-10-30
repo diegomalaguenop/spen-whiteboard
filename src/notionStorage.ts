@@ -38,3 +38,9 @@ export function saveNotionLink(boardId: string, link: NotionBoardLink): void {
   links[boardId] = link
   saveNotionLinks(links)
 }
+
+export function removeNotionLink(boardId: string): void {
+  const links = loadNotionLinks()
+  delete links[boardId]
+  saveNotionLinks(links)
+}

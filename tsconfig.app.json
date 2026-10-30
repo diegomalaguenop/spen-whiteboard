@@ -4,7 +4,7 @@
     "target": "es2023",
     "lib": ["ES2023", "DOM"],
     "module": "esnext",
-    "types": ["vite/client"],
+    "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"],
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
 
@@ -16,11 +16,15 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    /* Type safety */
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+
     /* Linting */
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "api"]
+  "include": ["src", "api", "shared"]
 }
