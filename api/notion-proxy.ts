@@ -1,6 +1,7 @@
+import { NOTION_VERSION } from '../shared/notionSchema'
+
 export const config = { runtime: 'edge' }
 
-const NOTION_VERSION = '2026-03-11'
 const NOTION_API_BASE = 'https://api.notion.com'
 
 interface ProxyRequestBody {

@@ -1,118 +1,71 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Excalidraw } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { AppState } from '@excalidraw/excalidraw/types'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
-import { exportBoardAsPdf, exportBoardAsPng, exportBoardAsSvg, getBoardPngBlob } from './export'
+import { exportBoardAsPdf, exportBoardAsPng, exportBoardAsSvg } from './export'
 import { TECHNICAL_STENCILS } from './stencils'
-import type { Board, Project } from './types'
+import type { Board } from './types'
 import { canvasKey, loadCanvasData, saveCanvasData } from './canvasStorage'
 import PresentationView from './PresentationView'
 import { exportToMermaid, type MermaidExportResult } from './mermaidExport'
 import MermaidExportModal from './MermaidExportModal'
 import type { NotionConfig } from './notionTypes'
-import {
-  loadNotionConfig,
-  saveNotionConfig,
-  clearNotionConfig,
-  loadNotionLinks,
-  saveNotionLinks,
-  saveNotionLink,
-} from './notionStorage'
-import { pushBoardToNotion, pullBoardsFromNotion, getRemoteUpdatedAt, fetchRemoteCanvasData } from './notionSync'
+import { loadNotionConfig, saveNotionConfig, clearNotionConfig, loadNotionLinks, saveNotionLinks } from './notionStorage'
+import { getRemoteUpdatedAt, fetchRemoteCanvasData, type PulledBoard } from './notionSync'
+import { useNotionSync } from './useNotionSync'
+import { useBoards } from './useBoards'
+import { useProjects } from './useProjects'
+import Sidebar from './Sidebar'
+import ExportMenu, { type ExportFormat } from './ExportMenu'
 import NotionPanel from './NotionPanel'
 import './App.css'
 
-const BOARDS_KEY = 'spen-whiteboard:boards'
-const PROJECTS_KEY = 'spen-whiteboard:projects'
 const CANVAS_SAVE_DEBOUNCE_MS = 500
-const NOTION_SYNC_DEBOUNCE_MS = 4000
-const DEFAULT_PROJECT_NAMES = ['FIN700', 'AdaptFit', 'UNAB', 'MTG', 'General']
 const CANVAS_NOT_READY_MESSAGE = 'La pizarra todavía se está cargando. Intentá exportar de nuevo en un momento.'
 
-type NotionStatus = 'disconnected' | 'syncing' | 'synced' | 'error'
-
-function loadBoards(): Board[] {
-  try {
-    const raw = localStorage.getItem(BOARDS_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch {
-    return []
-  }
-}
-
-function saveBoards(boards: Board[]) {
-  localStorage.setItem(BOARDS_KEY, JSON.stringify(boards))
-}
-
-function loadProjects(): Project[] {
-  try {
-    const raw = localStorage.getItem(PROJECTS_KEY)
-    if (raw) return JSON.parse(raw)
-  } catch {
-    // ignorar y recrear los proyectos default
-  }
-  return DEFAULT_PROJECT_NAMES.map((name) => ({ id: crypto.randomUUID(), name }))
-}
-
-function saveProjects(projects: Project[]): void {
-  localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects))
-}
-
-function normalize(text: string): string {
-  return text
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-}
-
 function App() {
-  const [boards, setBoards] = useState<Board[]>(loadBoards)
-  const [projects, setProjects] = useState<Project[]>(loadProjects)
-  const [activeId, setActiveId] = useState<string | null>(
-    boards[0]?.id ?? null
-  )
+  const boardsApi = useBoards()
+  const projectsApi = useProjects()
+  const { boards, boardsRef, activeId, activeIdRef, activeBoard } = boardsApi
+  const { projects } = projectsApi
+
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [newBoardName, setNewBoardName] = useState('')
-  const [newBoardProject, setNewBoardProject] = useState(projects[0]?.name ?? '')
-  const [newProjectName, setNewProjectName] = useState('')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [editingBoardId, setEditingBoardId] = useState<string | null>(null)
-  const [editingName, setEditingName] = useState('')
-  const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [presentation, setPresentation] = useState<{ boards: Board[]; index: number } | null>(null)
   const [mermaidModalOpen, setMermaidModalOpen] = useState(false)
   const [mermaidResult, setMermaidResult] = useState<MermaidExportResult | null>(null)
   const [notionConfig, setNotionConfig] = useState<NotionConfig | null>(loadNotionConfig)
-  const [notionStatus, setNotionStatus] = useState<NotionStatus>('disconnected')
-  const [notionError, setNotionError] = useState<string | null>(null)
   const [notionPanelOpen, setNotionPanelOpen] = useState(false)
   const saveTimeoutRef = useRef<number | null>(null)
-  const notionSyncTimeoutRef = useRef<number | null>(null)
-  const pendingNotionBoardIdRef = useRef<string | null>(null)
-  const flushPendingNotionSyncRef = useRef<() => void>(() => {})
   const excalidrawAPIRef = useRef<ExcalidrawImperativeAPI | null>(null)
-  const boardsRef = useRef<Board[]>(boards)
-  const exportMenuRef = useRef<HTMLDivElement | null>(null)
-  const exportMenuButtonRef = useRef<HTMLButtonElement | null>(null)
 
-  useEffect(() => {
-    saveBoards(boards)
-  }, [boards])
+  const handleBoardsPulled = useCallback(
+    (pulled: PulledBoard[]): void => {
+      boardsApi.addPulledBoards(pulled)
+      const links = loadNotionLinks()
+      for (const p of pulled) {
+        if (p.canvasData) {
+          localStorage.setItem(canvasKey(p.board.id), JSON.stringify(p.canvasData))
+        }
+        links[p.board.id] = p.link
+      }
+      saveNotionLinks(links)
+    },
+    [boardsApi.addPulledBoards]
+  )
 
-  useEffect(() => {
-    saveProjects(projects)
-  }, [projects])
-
-  useEffect(() => {
-    boardsRef.current = boards
-  }, [boards])
+  const notionSync = useNotionSync({
+    notionConfig,
+    boardsRef,
+    excalidrawAPIRef,
+    onBoardsPulled: handleBoardsPulled,
+  })
 
   useEffect(() => {
     function handleVisibilityChange(): void {
-      if (document.visibilityState === 'hidden') flushPendingNotionSyncRef.current()
+      if (document.visibilityState === 'hidden') notionSync.flushPending()
     }
     document.addEventListener('visibilitychange', handleVisibilityChange)
     window.addEventListener('pagehide', handleVisibilityChange)
@@ -120,104 +73,34 @@ function App() {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('pagehide', handleVisibilityChange)
     }
-  }, [])
+  }, [notionSync.flushPending])
 
-  useEffect(() => {
-    if (!exportMenuOpen) return
-    function handlePointerDown(event: PointerEvent): void {
-      const menu = exportMenuRef.current
-      if (menu && event.target instanceof Node && menu.contains(event.target)) return
-      setExportMenuOpen(false)
-    }
-    function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key !== 'Escape') return
-      setExportMenuOpen(false)
-      exportMenuButtonRef.current?.focus()
-    }
-    document.addEventListener('pointerdown', handlePointerDown)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [exportMenuOpen])
-
-  useEffect(() => {
-    if (!notionConfig) {
-      setNotionStatus('disconnected')
-      return
-    }
-    setNotionStatus('syncing')
-    setNotionError(null)
-    const localIds = new Set(boardsRef.current.map((b) => b.id))
-    pullBoardsFromNotion(notionConfig, localIds)
-      .then((pulled) => {
-        if (pulled.length > 0) {
-          setBoards((prev) => [...pulled.map((p) => p.board), ...prev])
-          const links = loadNotionLinks()
-          for (const p of pulled) {
-            if (p.canvasData) {
-              localStorage.setItem(canvasKey(p.board.id), JSON.stringify(p.canvasData))
-            }
-            links[p.board.id] = p.link
-          }
-          saveNotionLinks(links)
-        }
-        setNotionStatus('synced')
-      })
-      .catch((error: unknown) => {
-        setNotionStatus('error')
-        setNotionError(error instanceof Error ? error.message : 'Error desconocido al conectar con Notion')
-      })
-  }, [notionConfig])
-
-  const activeBoard = boards.find((b) => b.id === activeId) ?? null
-  const visibleBoards = boards.filter((b) => normalize(b.name).includes(normalize(searchQuery)))
-
-  function createBoard() {
-    const name = newBoardName.trim() || 'Sin título'
-    const now = Date.now()
-    const board: Board = {
-      id: crypto.randomUUID(),
-      name,
-      project: newBoardProject,
-      createdAt: now,
-      updatedAt: now,
-    }
-    setBoards((prev) => [board, ...prev])
-    setActiveId(board.id)
-    setNewBoardName('')
+  function createBoard(name: string, project: string): void {
+    // Flush antes de cambiar de pizarra activa: si no, el push pendiente de la pizarra anterior
+    // se dispararía después del remount del canvas y subiría el PNG de esta pizarra nueva con
+    // el id de la vieja.
+    notionSync.flushPending()
+    boardsApi.createBoard(name, project)
   }
 
-  function deleteBoard(id: string) {
+  function deleteBoard(id: string): void {
     if (!confirm('¿Borrar esta pizarra? Esta acción no se puede deshacer.')) return
-    setBoards((prev) => prev.filter((b) => b.id !== id))
-    localStorage.removeItem(canvasKey(id))
-    if (activeId === id) setActiveId(null)
+    // Si había un push agendado para esta pizarra, se cancela en vez de flushearlo: ya se va a
+    // borrar, no tiene sentido subirla a Notion.
+    notionSync.cancelPendingFor(id)
+    // Best-effort: si falla (sin red, token vencido), queda reflejado en notionSync.error, pero
+    // no bloqueamos el borrado local por eso.
+    void notionSync.deleteRemoteBoard(id)
+    boardsApi.deleteBoard(id)
   }
 
-  function commitRename(id: string): void {
-    const name = editingName.trim()
-    if (name) {
-      setBoards((prev) => prev.map((b) => (b.id === id ? { ...b, name, updatedAt: Date.now() } : b)))
-    }
-    setEditingBoardId(null)
+  function deleteProject(id: string): void {
+    projectsApi.deleteProject(id, boards)
   }
-
-  function flushPendingNotionSync(): void {
-    if (notionSyncTimeoutRef.current && pendingNotionBoardIdRef.current) {
-      clearTimeout(notionSyncTimeoutRef.current)
-      notionSyncTimeoutRef.current = null
-      const boardId = pendingNotionBoardIdRef.current
-      pendingNotionBoardIdRef.current = null
-      void syncBoardToNotion(boardId)
-    }
-  }
-  flushPendingNotionSyncRef.current = flushPendingNotionSync
 
   async function selectBoard(board: Board): Promise<void> {
     if (board.id === activeId) return
-    flushPendingNotionSync()
+    notionSync.flushPending()
     if (notionConfig) {
       const link = loadNotionLinks()[board.id]
       if (link) {
@@ -232,9 +115,7 @@ function App() {
               if (canvasData) {
                 localStorage.setItem(canvasKey(board.id), JSON.stringify(canvasData))
               }
-              setBoards((prev) =>
-                prev.map((b) => (b.id === board.id ? { ...b, updatedAt: remoteUpdatedAt } : b))
-              )
+              boardsApi.touchBoard(board.id, remoteUpdatedAt)
             }
           }
         } catch {
@@ -242,28 +123,7 @@ function App() {
         }
       }
     }
-    setActiveId(board.id)
-  }
-
-  async function syncBoardToNotion(boardId: string): Promise<void> {
-    if (!notionConfig) return
-    const api = excalidrawAPIRef.current
-    if (!api) return
-    const board = boardsRef.current.find((b) => b.id === boardId)
-    if (!board) return
-    setNotionStatus('syncing')
-    setNotionError(null)
-    try {
-      const canvasData = loadCanvasData(boardId)
-      const pngBlob = await getBoardPngBlob(api)
-      const existingLink = loadNotionLinks()[boardId] ?? null
-      const newLink = await pushBoardToNotion(notionConfig, board, canvasData, pngBlob, existingLink)
-      saveNotionLink(boardId, newLink)
-      setNotionStatus('synced')
-    } catch (error: unknown) {
-      setNotionStatus('error')
-      setNotionError(error instanceof Error ? error.message : 'Error desconocido al sincronizar')
-    }
+    boardsApi.setActiveBoardId(board.id)
   }
 
   function handleNotionConnected(config: NotionConfig): void {
@@ -275,29 +135,10 @@ function App() {
   function handleNotionDisconnect(): void {
     clearNotionConfig()
     setNotionConfig(null)
-    setNotionError(null)
     setNotionPanelOpen(false)
   }
 
-  function addProject(): void {
-    const name = newProjectName.trim()
-    if (!name) return
-    if (projects.some((p) => normalize(p.name) === normalize(name))) return
-    setProjects((prev) => [...prev, { id: crypto.randomUUID(), name }])
-    setNewProjectName('')
-  }
-
-  function deleteProject(id: string): void {
-    const project = projects.find((p) => p.id === id)
-    if (!project) return
-    if (DEFAULT_PROJECT_NAMES.includes(project.name)) return
-    if (boards.some((b) => b.project === project.name)) return
-    if (!confirm(`¿Borrar el proyecto "${project.name}"?`)) return
-    setProjects((prev) => prev.filter((p) => p.id !== id))
-  }
-
-  async function handleExport(format: 'png' | 'svg' | 'pdf'): Promise<void> {
-    setExportMenuOpen(false)
+  async function handleExport(format: ExportFormat): Promise<void> {
     const api = excalidrawAPIRef.current
     if (!api || !activeBoard) {
       alert(CANVAS_NOT_READY_MESSAGE)
@@ -317,7 +158,6 @@ function App() {
   }
 
   function handleMermaidExport(): void {
-    setExportMenuOpen(false)
     const api = excalidrawAPIRef.current
     if (!api) {
       alert(CANVAS_NOT_READY_MESSAGE)
@@ -332,182 +172,46 @@ function App() {
     setPresentation({ boards: presentBoards, index: 0 })
   }
 
-  function handleCanvasChange(elements: readonly ExcalidrawElement[], appState: AppState): void {
-    if (!activeBoard) return
-    const boardId = activeBoard.id
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
-    saveTimeoutRef.current = window.setTimeout(() => {
-      saveCanvasData(boardId, elements, appState)
-      setBoards((prev) => prev.map((b) => (b.id === boardId ? { ...b, updatedAt: Date.now() } : b)))
-    }, CANVAS_SAVE_DEBOUNCE_MS)
+  const handleCanvasChange = useCallback(
+    (elements: readonly ExcalidrawElement[], appState: AppState): void => {
+      const boardId = activeIdRef.current
+      if (!boardId) return
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
+      saveTimeoutRef.current = window.setTimeout(() => {
+        saveCanvasData(boardId, elements, appState)
+        boardsApi.touchBoard(boardId)
+      }, CANVAS_SAVE_DEBOUNCE_MS)
 
-    if (notionConfig) {
-      if (notionSyncTimeoutRef.current) clearTimeout(notionSyncTimeoutRef.current)
-      pendingNotionBoardIdRef.current = boardId
-      notionSyncTimeoutRef.current = window.setTimeout(() => {
-        pendingNotionBoardIdRef.current = null
-        void syncBoardToNotion(boardId)
-      }, NOTION_SYNC_DEBOUNCE_MS)
-    }
-  }
+      notionSync.scheduleSync(boardId)
+    },
+    [activeIdRef, boardsApi.touchBoard, notionSync.scheduleSync]
+  )
+
+  const handleExcalidrawAPI = useCallback((api: ExcalidrawImperativeAPI) => {
+    excalidrawAPIRef.current = api
+    void api.updateLibrary({ libraryItems: TECHNICAL_STENCILS, merge: true })
+  }, [])
 
   return (
     <>
     <div className="app-shell">
       {sidebarOpen && (
-        <aside className="sidebar">
-          <div className="sidebar-header">
-            <h1>Pizarras</h1>
-            <button
-              className="icon-btn"
-              onClick={() => setSidebarOpen(false)}
-              title="Ocultar panel"
-            >
-              ⮜
-            </button>
-          </div>
-
-          <button
-            className={`notion-status notion-status-${notionStatus}`}
-            onClick={() => setNotionPanelOpen(true)}
-            title={notionError ?? undefined}
-          >
-            <span className="notion-status-dot" />
-            {notionStatus === 'disconnected' && 'No conectado'}
-            {notionStatus === 'syncing' && 'Sincronizando...'}
-            {notionStatus === 'synced' && 'Sincronizado con Notion'}
-            {notionStatus === 'error' && 'Error de sync'}
-          </button>
-          {notionStatus === 'error' && notionError && (
-            <p className="notion-error-text">{notionError}</p>
-          )}
-
-          <div className="new-board">
-            <select
-              value={newBoardProject}
-              onChange={(e) => setNewBoardProject(e.target.value)}
-            >
-              {projects.map((p) => (
-                <option key={p.id} value={p.name}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-            <input
-              type="text"
-              placeholder="Nombre de la pizarra"
-              value={newBoardName}
-              onChange={(e) => setNewBoardName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && createBoard()}
-            />
-            <button onClick={createBoard}>+ Nueva pizarra</button>
-          </div>
-
-          <div className="add-project">
-            <input
-              type="text"
-              placeholder="Nombre del proyecto"
-              value={newProjectName}
-              onChange={(e) => setNewProjectName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && addProject()}
-            />
-            <button onClick={addProject}>+ Agregar proyecto</button>
-          </div>
-
-          <input
-            type="text"
-            className="search-input"
-            placeholder="Buscar pizarra..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-
-          <div className="board-list">
-            {projects.map((project) => {
-              const projectBoards = visibleBoards.filter((b) => b.project === project.name)
-              const isDefault = DEFAULT_PROJECT_NAMES.includes(project.name)
-              if (projectBoards.length === 0 && (isDefault || searchQuery)) return null
-              return (
-                <div key={project.id} className="project-group">
-                  <div className="project-label-row">
-                    <span className="project-label">{project.name}</span>
-                    {projectBoards.length > 0 && (
-                      <button
-                        className="present-project-btn"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          startPresentation(projectBoards)
-                        }}
-                        title="Presentar proyecto"
-                      >
-                        ▶
-                      </button>
-                    )}
-                    {!isDefault && projectBoards.length === 0 && (
-                      <button
-                        className="delete-project-btn"
-                        onClick={() => deleteProject(project.id)}
-                        title="Borrar proyecto"
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                  {projectBoards.length === 0 ? (
-                    <p className="empty-hint">Sin pizarras</p>
-                  ) : (
-                    projectBoards.map((b) => (
-                      <div
-                        key={b.id}
-                        className={`board-item ${b.id === activeId ? 'active' : ''}`}
-                        onClick={() => void selectBoard(b)}
-                      >
-                        {b.id === editingBoardId ? (
-                          <input
-                            className="board-name-input"
-                            autoFocus
-                            value={editingName}
-                            onChange={(e) => setEditingName(e.target.value)}
-                            onBlur={() => commitRename(b.id)}
-                            onClick={(e) => e.stopPropagation()}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') commitRename(b.id)
-                              else if (e.key === 'Escape') setEditingBoardId(null)
-                            }}
-                          />
-                        ) : (
-                          <span
-                            className="board-name"
-                            onDoubleClick={(e) => {
-                              e.stopPropagation()
-                              setEditingBoardId(b.id)
-                              setEditingName(b.name)
-                            }}
-                          >
-                            {b.name}
-                          </span>
-                        )}
-                        <button
-                          className="delete-btn"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            deleteBoard(b.id)
-                          }}
-                          title="Borrar"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )
-            })}
-            {boards.length === 0 && (
-              <p className="empty-hint">Creá tu primera pizarra arriba.</p>
-            )}
-          </div>
-        </aside>
+        <Sidebar
+          boards={boards}
+          projects={projects}
+          activeId={activeId}
+          notionStatus={notionSync.status}
+          notionError={notionSync.error}
+          onOpenNotionPanel={() => setNotionPanelOpen(true)}
+          onClose={() => setSidebarOpen(false)}
+          onCreateBoard={createBoard}
+          onAddProject={projectsApi.addProject}
+          onDeleteProject={deleteProject}
+          onSelectBoard={(board) => void selectBoard(board)}
+          onDeleteBoard={deleteBoard}
+          onRenameBoard={boardsApi.renameBoard}
+          onStartPresentation={startPresentation}
+        />
       )}
 
       <main className="canvas-area">
@@ -540,72 +244,14 @@ function App() {
               >
                 ▶ Presentar
               </button>
-              <div className="export-menu" ref={exportMenuRef}>
-                <button
-                  ref={exportMenuButtonRef}
-                  className="export-menu-btn"
-                  disabled={exporting}
-                  aria-haspopup="menu"
-                  aria-expanded={exportMenuOpen}
-                  aria-controls="export-menu-dropdown"
-                  aria-busy={exporting}
-                  aria-label={exporting ? 'Exportando pizarra…' : 'Exportar pizarra'}
-                  onClick={() => setExportMenuOpen((open) => !open)}
-                >
-                  <span aria-hidden="true">⬇</span> Exportar
-                </button>
-                {exportMenuOpen && (
-                  <div
-                    id="export-menu-dropdown"
-                    className="export-menu-dropdown"
-                    role="menu"
-                    aria-label="Formatos de exportación"
-                  >
-                    <button
-                      className="export-menu-item"
-                      role="menuitem"
-                      aria-label="Exportar como PNG"
-                      onClick={() => handleExport('png')}
-                    >
-                      PNG
-                    </button>
-                    <button
-                      className="export-menu-item"
-                      role="menuitem"
-                      aria-label="Exportar como SVG"
-                      onClick={() => handleExport('svg')}
-                    >
-                      SVG
-                    </button>
-                    <button
-                      className="export-menu-item"
-                      role="menuitem"
-                      aria-label="Exportar como PDF"
-                      onClick={() => handleExport('pdf')}
-                    >
-                      PDF
-                    </button>
-                    <button
-                      className="export-menu-item"
-                      role="menuitem"
-                      aria-label="Exportar como diagrama Mermaid"
-                      onClick={handleMermaidExport}
-                    >
-                      Mermaid
-                    </button>
-                  </div>
-                )}
-              </div>
+              <ExportMenu exporting={exporting} onExport={(f) => void handleExport(f)} onMermaidExport={handleMermaidExport} />
             </div>
             <div className="excalidraw-wrapper">
               <Excalidraw
                 key={activeBoard.id}
                 initialData={loadCanvasData(activeBoard.id) ?? undefined}
                 onChange={handleCanvasChange}
-                excalidrawAPI={(api) => {
-                  excalidrawAPIRef.current = api
-                  void api.updateLibrary({ libraryItems: TECHNICAL_STENCILS, merge: true })
-                }}
+                excalidrawAPI={handleExcalidrawAPI}
                 theme="dark"
               />
             </div>

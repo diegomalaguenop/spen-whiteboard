@@ -111,8 +111,8 @@ describe('exportBoardAsPng', () => {
 
     // Assert
     expect(createObjectUrlMock).toHaveBeenCalledTimes(1)
-    const downloadedBlob = createObjectUrlMock.mock.calls[0][0]
-    expect(downloadedBlob.type).toBe('image/png')
+    const downloadedBlob = createObjectUrlMock.mock.calls[0]?.[0]
+    expect(downloadedBlob?.type).toBe('image/png')
     expect(downloadedFilenames).toEqual(['Arquitectura.png'])
   })
 
@@ -182,8 +182,8 @@ describe('exportBoardAsSvg', () => {
     await exportBoardAsSvg(api, 'Diagrama')
 
     // Assert
-    const downloadedBlob = createObjectUrlMock.mock.calls[0][0]
-    expect(downloadedBlob.type).toBe('image/svg+xml;charset=utf-8')
+    const downloadedBlob = createObjectUrlMock.mock.calls[0]?.[0]
+    expect(downloadedBlob?.type).toBe('image/svg+xml;charset=utf-8')
     expect(downloadedFilenames).toEqual(['Diagrama.svg'])
   })
 

@@ -2,9 +2,7 @@ import { notionRequest, notionUploadFile } from './notionClient'
 import type { NotionBoardLink, NotionConfig } from './notionTypes'
 import type { Board } from './types'
 import type { StoredCanvasData } from './canvasStorage'
-
-const DATABASE_TITLE = 'S Pen Whiteboard'
-const RICH_TEXT_CHUNK_SIZE = 2000
+import { DATABASE_TITLE, PROP_NAME, PROP_PROJECT, PROP_UPDATED_AT, PROP_BOARD_ID, normalizeId } from '../shared/notionSchema'
 
 interface NotionRichText {
   type: 'text'
@@ -36,7 +34,11 @@ interface NotionSearchResponse {
 interface NotionBlockObject {
   id: string
   type: string
+  // "code" solo aparece en bloques creados por versiones viejas de esta app, antes de que el
+  // JSON del canvas se subiera como archivo adjunto (ver readCanvasDataFromBlock). Se mantiene
+  // para poder seguir leyendo pizarras ya sincronizadas con ese formato.
   code?: { rich_text: NotionRichText[] }
+  file?: { type?: string; file?: { url?: string }; external?: { url?: string } }
   image?: unknown
 }
 
@@ -53,16 +55,82 @@ interface NotionQueryResponse {
   results: NotionPageObject[]
 }
 
-function normalizeId(id: string): string {
-  return id.replace(/-/g, '')
+function canvasDataToJsonBlob(canvasData: StoredCanvasData | null): Blob {
+  const json = JSON.stringify(canvasData ?? { elements: [], appState: {} })
+  return new Blob([json], { type: 'application/json' })
 }
 
-function chunkRichText(text: string): NotionRichText[] {
-  const chunks: NotionRichText[] = []
-  for (let i = 0; i < text.length; i += RICH_TEXT_CHUNK_SIZE) {
-    chunks.push({ type: 'text', text: { content: text.slice(i, i + RICH_TEXT_CHUNK_SIZE) } })
+function parseCanvasJson(json: string): StoredCanvasData | null {
+  try {
+    return JSON.parse(json) as StoredCanvasData
+  } catch {
+    return null
   }
-  return chunks.length > 0 ? chunks.slice(0, 100) : [{ type: 'text', text: { content: '' } }]
+}
+
+// Lee el JSON del canvas desde el bloque que lo guarda, sea un bloque "file" (formato actual,
+// sin límite práctico de tamaño) o uno "code" (formato viejo, antes del fix del truncado a
+// ~200KB en notionSync.ts — ver chunkRichText en el historial de git).
+async function readCanvasDataFromBlock(block: NotionBlockObject): Promise<StoredCanvasData | null> {
+  if (block.type === 'file') {
+    const url = block.file?.file?.url ?? block.file?.external?.url
+    if (!url) return null
+    try {
+      const response = await fetch(url)
+      if (!response.ok) return null
+      return parseCanvasJson(await response.text())
+    } catch {
+      return null
+    }
+  }
+  if (block.type === 'code') {
+    return parseCanvasJson(joinRichText(block.code?.rich_text ?? []))
+  }
+  return null
+}
+
+async function fetchBlockChildren(token: string, parentId: string): Promise<NotionBlockObject[]> {
+  const response = await notionRequest<NotionBlockChildrenResponse>(token, 'GET', `/v1/blocks/${parentId}/children`)
+  return response.results
+}
+
+// El bloque de datos (JSON del canvas) es "file" en pizarras pusheadas con la versión actual de
+// la app, o "code" en una sincronizada antes del fix del truncado — ver readCanvasDataFromBlock.
+function findDataAndImageBlocks(
+  blocks: NotionBlockObject[]
+): { dataBlock: NotionBlockObject; imageBlock: NotionBlockObject } | null {
+  const dataBlock = blocks.find((b) => b.type === 'file' || b.type === 'code')
+  const imageBlock = blocks.find((b) => b.type === 'image')
+  if (!dataBlock || !imageBlock) return null
+  return { dataBlock, imageBlock }
+}
+
+// PATCH no permite cambiarle el tipo a un bloque existente, así que una pizarra sincronizada
+// antes de este fix (con un bloque "code") no se puede actualizar in-place a "file": hay que
+// borrar el bloque viejo y agregar uno nuevo. Devuelve el id del bloque que quedó con los datos.
+async function replaceDataBlock(
+  token: string,
+  pageId: string,
+  existingBlockId: string,
+  fileUploadId: string
+): Promise<string> {
+  try {
+    await notionRequest(token, 'PATCH', `/v1/blocks/${existingBlockId}`, {
+      file: { file_upload: { id: fileUploadId } },
+    })
+    return existingBlockId
+  } catch {
+    await notionRequest(token, 'DELETE', `/v1/blocks/${existingBlockId}`)
+    const appended = await notionRequest<NotionBlockChildrenResponse>(
+      token,
+      'PATCH',
+      `/v1/blocks/${pageId}/children`,
+      { children: [{ object: 'block', type: 'file', file: { file_upload: { id: fileUploadId } } }] }
+    )
+    const newBlock = appended.results.find((b) => b.type === 'file')
+    if (!newBlock) throw new Error('No se pudo reemplazar el bloque de datos en Notion')
+    return newBlock.id
+  }
 }
 
 function titleProperty(name: string): unknown {
@@ -81,10 +149,25 @@ function richTextProperty(text: string): unknown {
   return { rich_text: [{ text: { content: text } }] }
 }
 
+function joinRichText(parts: NotionRichText[]): string {
+  return parts.map((p) => p.plain_text ?? p.text.content).join('')
+}
+
+// Las properties que pushBoardToNotion manda tanto al crear una página como al actualizarla
+// (Board ID solo se manda al crear: no tiene sentido re-mandarlo en cada PATCH).
+function boardProperties(board: Board, { includeBoardId }: { includeBoardId: boolean }): Record<string, unknown> {
+  const properties: Record<string, unknown> = {
+    [PROP_NAME]: titleProperty(board.name),
+    [PROP_PROJECT]: selectProperty(board.project),
+    [PROP_UPDATED_AT]: dateProperty(board.updatedAt),
+  }
+  if (includeBoardId) properties[PROP_BOARD_ID] = richTextProperty(board.id)
+  return properties
+}
+
 function plainTextFromProperty(properties: Record<string, unknown>, key: string): string {
   const prop = properties[key] as { title?: NotionRichText[]; rich_text?: NotionRichText[] } | undefined
-  const parts = prop?.title ?? prop?.rich_text ?? []
-  return parts.map((p) => p.plain_text ?? p.text.content).join('')
+  return joinRichText(prop?.title ?? prop?.rich_text ?? [])
 }
 
 function selectNameFromProperty(properties: Record<string, unknown>, key: string): string {
@@ -123,10 +206,10 @@ async function createDatabase(
     title: [{ type: 'text', text: { content: DATABASE_TITLE } }],
     initial_data_source: {
       properties: {
-        Nombre: { title: {} },
-        Proyecto: { select: { options: [] } },
-        'Última edición': { date: {} },
-        'Board ID': { rich_text: {} },
+        [PROP_NAME]: { title: {} },
+        [PROP_PROJECT]: { select: { options: [] } },
+        [PROP_UPDATED_AT]: { date: {} },
+        [PROP_BOARD_ID]: { rich_text: {} },
       },
     },
   })
@@ -149,8 +232,7 @@ export async function pushBoardToNotion(
   pngBlob: Blob,
   existingLink: NotionBoardLink | null
 ): Promise<NotionBoardLink> {
-  const json = JSON.stringify(canvasData ?? { elements: [], appState: {} })
-  const codeRichText = chunkRichText(json)
+  const canvasBlob = canvasDataToJsonBlob(canvasData)
 
   // Un link guardado con codeBlockId/imageBlockId vacíos (ej. de una versión vieja de
   // pullBoardsFromNotion que los dejaba en '' cuando no encontraba los bloques) no sirve para
@@ -159,17 +241,13 @@ export async function pushBoardToNotion(
   const hasUsableLink = !!existingLink && !!existingLink.codeBlockId && !!existingLink.imageBlockId
 
   if (!hasUsableLink) {
+    const canvasFileUploadId = await notionUploadFile(config.token, canvasBlob, `${board.id}.json`)
     const fileUploadId = await notionUploadFile(config.token, pngBlob, `${board.id}.png`)
     const page = await notionRequest<NotionPageObject>(config.token, 'POST', '/v1/pages', {
       parent: { type: 'data_source_id', data_source_id: config.dataSourceId },
-      properties: {
-        Nombre: titleProperty(board.name),
-        Proyecto: selectProperty(board.project),
-        'Última edición': dateProperty(board.updatedAt),
-        'Board ID': richTextProperty(board.id),
-      },
+      properties: boardProperties(board, { includeBoardId: true }),
       children: [
-        { object: 'block', type: 'code', code: { rich_text: codeRichText, language: 'json' } },
+        { object: 'block', type: 'file', file: { file_upload: { id: canvasFileUploadId } } },
         {
           object: 'block',
           type: 'image',
@@ -177,40 +255,35 @@ export async function pushBoardToNotion(
         },
       ],
     })
-    const children = await notionRequest<NotionBlockChildrenResponse>(
-      config.token,
-      'GET',
-      `/v1/blocks/${page.id}/children`
-    )
-    const codeBlock = children.results.find((b) => b.type === 'code')
-    const imageBlock = children.results.find((b) => b.type === 'image')
-    if (!codeBlock || !imageBlock) {
+    const blocks = await fetchBlockChildren(config.token, page.id)
+    const found = findDataAndImageBlocks(blocks)
+    if (!found) {
       throw new Error('No se pudieron ubicar los bloques recién creados en Notion')
     }
     return {
       notionPageId: page.id,
-      codeBlockId: codeBlock.id,
-      imageBlockId: imageBlock.id,
+      codeBlockId: found.dataBlock.id,
+      imageBlockId: found.imageBlock.id,
       remoteUpdatedAt: board.updatedAt,
     }
   }
 
   await notionRequest(config.token, 'PATCH', `/v1/pages/${existingLink.notionPageId}`, {
-    properties: {
-      Nombre: titleProperty(board.name),
-      Proyecto: selectProperty(board.project),
-      'Última edición': dateProperty(board.updatedAt),
-    },
+    properties: boardProperties(board, { includeBoardId: false }),
   })
-  await notionRequest(config.token, 'PATCH', `/v1/blocks/${existingLink.codeBlockId}`, {
-    code: { rich_text: codeRichText, language: 'json' },
-  })
+  const canvasFileUploadId = await notionUploadFile(config.token, canvasBlob, `${board.id}.json`)
+  const dataBlockId = await replaceDataBlock(
+    config.token,
+    existingLink.notionPageId,
+    existingLink.codeBlockId,
+    canvasFileUploadId
+  )
   const fileUploadId = await notionUploadFile(config.token, pngBlob, `${board.id}.png`)
   await notionRequest(config.token, 'PATCH', `/v1/blocks/${existingLink.imageBlockId}`, {
     image: { file_upload: { id: fileUploadId } },
   })
 
-  return { ...existingLink, remoteUpdatedAt: board.updatedAt }
+  return { ...existingLink, codeBlockId: dataBlockId, remoteUpdatedAt: board.updatedAt }
 }
 
 export interface PulledBoard {
@@ -232,43 +305,32 @@ export async function pullBoardsFromNotion(
   const pulled: PulledBoard[] = []
 
   for (const page of query.results) {
-    const boardId = plainTextFromProperty(page.properties, 'Board ID')
+    const boardId = plainTextFromProperty(page.properties, PROP_BOARD_ID)
     if (!boardId || localBoardIds.has(boardId)) continue
 
-    const name = plainTextFromProperty(page.properties, 'Nombre') || 'Sin título'
-    const project = selectNameFromProperty(page.properties, 'Proyecto')
-    const remoteUpdatedAt = dateFromProperty(page.properties, 'Última edición')
+    const name = plainTextFromProperty(page.properties, PROP_NAME) || 'Sin título'
+    const project = selectNameFromProperty(page.properties, PROP_PROJECT)
+    const remoteUpdatedAt = dateFromProperty(page.properties, PROP_UPDATED_AT)
 
-    const children = await notionRequest<NotionBlockChildrenResponse>(
-      config.token,
-      'GET',
-      `/v1/blocks/${page.id}/children`
-    )
-    const codeBlock = children.results.find((b) => b.type === 'code')
-    const imageBlock = children.results.find((b) => b.type === 'image')
-    if (!codeBlock || !imageBlock) {
-      // No tiene la estructura que arma pushBoardToNotion (código + imagen) — no es una
+    const blocks = await fetchBlockChildren(config.token, page.id)
+    const found = findDataAndImageBlocks(blocks)
+    if (!found) {
+      // No tiene la estructura que arma pushBoardToNotion (datos + imagen) — no es una
       // pizarra real de la app (ej. una página de prueba creada a mano en la database), así
       // que no se trae como board local: hacerlo guardaría un link con codeBlockId/imageBlockId
       // vacíos, y la próxima sync intentaría un PATCH a "/v1/blocks/" sin id, que Notion rechaza.
       continue
     }
 
-    const json = codeBlock.code?.rich_text.map((rt) => rt.plain_text ?? rt.text.content).join('') ?? ''
-    let canvasData: StoredCanvasData | null = null
-    try {
-      canvasData = JSON.parse(json) as StoredCanvasData
-    } catch {
-      canvasData = null
-    }
+    const canvasData = await readCanvasDataFromBlock(found.dataBlock)
 
     pulled.push({
       board: { id: boardId, name, project, createdAt: remoteUpdatedAt, updatedAt: remoteUpdatedAt },
       canvasData,
       link: {
         notionPageId: page.id,
-        codeBlockId: codeBlock.id,
-        imageBlockId: imageBlock.id,
+        codeBlockId: found.dataBlock.id,
+        imageBlockId: found.imageBlock.id,
         remoteUpdatedAt,
       },
     })
@@ -279,24 +341,24 @@ export async function pullBoardsFromNotion(
 
 export async function getRemoteUpdatedAt(config: NotionConfig, notionPageId: string): Promise<number> {
   const page = await notionRequest<NotionPageObject>(config.token, 'GET', `/v1/pages/${notionPageId}`)
-  return dateFromProperty(page.properties, 'Última edición')
+  return dateFromProperty(page.properties, PROP_UPDATED_AT)
 }
 
 export async function fetchRemoteCanvasData(
   config: NotionConfig,
   link: NotionBoardLink
 ): Promise<StoredCanvasData | null> {
-  const codeBlock = await notionRequest<{ code?: { rich_text: NotionRichText[] } }>(
+  const dataBlock = await notionRequest<NotionBlockObject>(
     config.token,
     'GET',
     `/v1/blocks/${link.codeBlockId}`
   )
-  if (!codeBlock.code) return null
-  const json = codeBlock.code.rich_text.map((rt) => rt.plain_text ?? rt.text.content).join('')
-  try {
-    return JSON.parse(json) as StoredCanvasData
-  } catch {
-    return null
-  }
+  return readCanvasDataFromBlock(dataBlock)
+}
+
+// Notion no tiene un "delete" físico para páginas vía API pública: archivarla es el equivalente
+// a mandarla a la papelera, que es lo que hace la UI de Notion al borrar.
+export async function deleteBoardFromNotion(config: NotionConfig, notionPageId: string): Promise<void> {
+  await notionRequest(config.token, 'PATCH', `/v1/pages/${notionPageId}`, { archived: true })
 }
 
