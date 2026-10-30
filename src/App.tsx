@@ -29,6 +29,7 @@ const PROJECTS_KEY = 'spen-whiteboard:projects'
 const CANVAS_SAVE_DEBOUNCE_MS = 500
 const NOTION_SYNC_DEBOUNCE_MS = 4000
 const DEFAULT_PROJECT_NAMES = ['FIN700', 'AdaptFit', 'UNAB', 'MTG', 'General']
+const CANVAS_NOT_READY_MESSAGE = 'La pizarra todavía se está cargando. Intentá exportar de nuevo en un momento.'
 
 type NotionStatus = 'disconnected' | 'syncing' | 'synced' | 'error'
 
@@ -94,6 +95,8 @@ function App() {
   const flushPendingNotionSyncRef = useRef<() => void>(() => {})
   const excalidrawAPIRef = useRef<ExcalidrawImperativeAPI | null>(null)
   const boardsRef = useRef<Board[]>(boards)
+  const exportMenuRef = useRef<HTMLDivElement | null>(null)
+  const exportMenuButtonRef = useRef<HTMLButtonElement | null>(null)
 
   useEffect(() => {
     saveBoards(boards)
@@ -118,6 +121,26 @@ function App() {
       window.removeEventListener('pagehide', handleVisibilityChange)
     }
   }, [])
+
+  useEffect(() => {
+    if (!exportMenuOpen) return
+    function handlePointerDown(event: PointerEvent): void {
+      const menu = exportMenuRef.current
+      if (menu && event.target instanceof Node && menu.contains(event.target)) return
+      setExportMenuOpen(false)
+    }
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key !== 'Escape') return
+      setExportMenuOpen(false)
+      exportMenuButtonRef.current?.focus()
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [exportMenuOpen])
 
   useEffect(() => {
     if (!notionConfig) {
@@ -274,9 +297,12 @@ function App() {
   }
 
   async function handleExport(format: 'png' | 'svg' | 'pdf'): Promise<void> {
-    const api = excalidrawAPIRef.current
-    if (!api || !activeBoard) return
     setExportMenuOpen(false)
+    const api = excalidrawAPIRef.current
+    if (!api || !activeBoard) {
+      alert(CANVAS_NOT_READY_MESSAGE)
+      return
+    }
     setExporting(true)
     try {
       if (format === 'png') await exportBoardAsPng(api, activeBoard.name)
@@ -291,9 +317,12 @@ function App() {
   }
 
   function handleMermaidExport(): void {
-    const api = excalidrawAPIRef.current
-    if (!api) return
     setExportMenuOpen(false)
+    const api = excalidrawAPIRef.current
+    if (!api) {
+      alert(CANVAS_NOT_READY_MESSAGE)
+      return
+    }
     setMermaidResult(exportToMermaid(api.getSceneElements()))
     setMermaidModalOpen(true)
   }
@@ -511,26 +540,57 @@ function App() {
               >
                 ▶ Presentar
               </button>
-              <div className="export-menu">
+              <div className="export-menu" ref={exportMenuRef}>
                 <button
+                  ref={exportMenuButtonRef}
                   className="export-menu-btn"
                   disabled={exporting}
+                  aria-haspopup="menu"
+                  aria-expanded={exportMenuOpen}
+                  aria-controls="export-menu-dropdown"
+                  aria-busy={exporting}
+                  aria-label={exporting ? 'Exportando pizarra…' : 'Exportar pizarra'}
                   onClick={() => setExportMenuOpen((open) => !open)}
                 >
-                  ⬇ Exportar
+                  <span aria-hidden="true">⬇</span> Exportar
                 </button>
                 {exportMenuOpen && (
-                  <div className="export-menu-dropdown">
-                    <button className="export-menu-item" onClick={() => handleExport('png')}>
+                  <div
+                    id="export-menu-dropdown"
+                    className="export-menu-dropdown"
+                    role="menu"
+                    aria-label="Formatos de exportación"
+                  >
+                    <button
+                      className="export-menu-item"
+                      role="menuitem"
+                      aria-label="Exportar como PNG"
+                      onClick={() => handleExport('png')}
+                    >
                       PNG
                     </button>
-                    <button className="export-menu-item" onClick={() => handleExport('svg')}>
+                    <button
+                      className="export-menu-item"
+                      role="menuitem"
+                      aria-label="Exportar como SVG"
+                      onClick={() => handleExport('svg')}
+                    >
                       SVG
                     </button>
-                    <button className="export-menu-item" onClick={() => handleExport('pdf')}>
+                    <button
+                      className="export-menu-item"
+                      role="menuitem"
+                      aria-label="Exportar como PDF"
+                      onClick={() => handleExport('pdf')}
+                    >
                       PDF
                     </button>
-                    <button className="export-menu-item" onClick={handleMermaidExport}>
+                    <button
+                      className="export-menu-item"
+                      role="menuitem"
+                      aria-label="Exportar como diagrama Mermaid"
+                      onClick={handleMermaidExport}
+                    >
                       Mermaid
                     </button>
                   </div>

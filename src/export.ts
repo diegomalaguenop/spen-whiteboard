@@ -29,8 +29,28 @@ type ExportToSvgFn = (
 const exportToCanvas = exportToCanvasUntyped as ExportToCanvasFn
 const exportToSvg = exportToSvgUntyped as ExportToSvgFn
 
+const DEFAULT_FILENAME = 'pizarra'
+const MAX_FILENAME_LENGTH = 100
+// Some browsers (older Safari/Firefox) abort the download if the blob URL is revoked
+// synchronously right after click(), so revocation is deferred.
+const REVOKE_URL_DELAY_MS = 1000
+
+const EMPTY_BOARD_ERROR_MESSAGE = 'La pizarra está vacía: no hay nada para exportar'
+
+function isPrintableChar(char: string): boolean {
+  const code = char.charCodeAt(0)
+  return code >= 0x20 && code !== 0x7f
+}
+
 function sanitizeFilename(name: string): string {
-  return name.trim().replace(/[/\\:*?"<>|]/g, '_') || 'pizarra'
+  const replaced = Array.from(name)
+    .filter(isPrintableChar)
+    .join('')
+    .replace(/[/\\:*?"<>|]/g, '_')
+    .trim()
+  const truncated = Array.from(replaced).slice(0, MAX_FILENAME_LENGTH).join('')
+  const cleaned = truncated.replace(/[\s.]+$/, '')
+  return cleaned || DEFAULT_FILENAME
 }
 
 function downloadBlob(blob: Blob, filename: string): void {
@@ -39,20 +59,29 @@ function downloadBlob(blob: Blob, filename: string): void {
   link.href = url
   link.download = filename
   link.click()
-  URL.revokeObjectURL(url)
+  window.setTimeout(() => URL.revokeObjectURL(url), REVOKE_URL_DELAY_MS)
 }
 
 function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (blob) resolve(blob)
-      else reject(new Error('No se pudo generar la imagen del canvas'))
+      else
+        reject(
+          new Error(`No se pudo generar la imagen PNG del canvas (${canvas.width}x${canvas.height}px)`)
+        )
     }, 'image/png')
   })
 }
 
-async function renderBoardToCanvas(api: ExcalidrawImperativeAPI): Promise<HTMLCanvasElement> {
+function getExportableElements(api: ExcalidrawImperativeAPI): readonly NonDeletedExcalidrawElement[] {
   const elements = api.getSceneElements()
+  if (elements.length === 0) throw new Error(EMPTY_BOARD_ERROR_MESSAGE)
+  return elements
+}
+
+async function renderBoardToCanvas(api: ExcalidrawImperativeAPI): Promise<HTMLCanvasElement> {
+  const elements = getExportableElements(api)
   const appState = api.getAppState()
   const files = api.getFiles()
   return exportToCanvas(elements, appState, files, {
@@ -72,7 +101,7 @@ export async function getBoardPngBlob(api: ExcalidrawImperativeAPI): Promise<Blo
 }
 
 export async function exportBoardAsSvg(api: ExcalidrawImperativeAPI, boardName: string): Promise<void> {
-  const elements = api.getSceneElements()
+  const elements = getExportableElements(api)
   const appState = api.getAppState()
   const files = api.getFiles()
   const svg = await exportToSvg(
